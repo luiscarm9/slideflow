@@ -1,12 +1,13 @@
 import random
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import pdb
+import neptune as neptune
+from neptune.utils import stringify_unsupported
 
 import slideflow as sf
 from slideflow.util import log
 
 if TYPE_CHECKING:
-    import neptune.new as neptune
-
     from slideflow import Dataset
 
 
@@ -28,7 +29,6 @@ class NeptuneLog:
     ) -> "neptune.Run":
         '''Starts a neptune run'''
 
-        import neptune.new as neptune
         from neptune import management
 
         if tags is None:
@@ -40,8 +40,9 @@ class NeptuneLog:
             _id = f'SF{str(random.random())[2:9]}'
             log.debug(f"Neptune project {project_name} does not exist")
             log.info(f"Creating Neptune project {project_name} (ID: {_id})")
-            management.create_project(project_name, _id)
-        self.run = neptune.init(project=project_name, api_token=self.api_token)
+            management.create_project(project_name, key=_id)
+
+        self.run = neptune.init_run(project=project_name, api_token=self.api_token)
         run_loc = f'{self.workspace}/{project_name}'
         log.info(f'Neptune run {name} initialized at {run_loc}')
         self.run['sys/name'] = name
@@ -61,7 +62,7 @@ class NeptuneLog:
                 "Neptune run not yet initialized (start with start_run())"
             )
         for model_info_key in model_keys:
-            self.run[model_info_key] = hp_data[model_info_key]
+            self.run[model_info_key] = stringify_unsupported(hp_data[model_info_key])
         outcomes = {
             str(key): str(value)
             for key, value in hp_data['outcome_labels'].items()
@@ -71,10 +72,10 @@ class NeptuneLog:
             for key in hp_data.keys()
             if 'validation' in key
         }
-        self.run['backend'] = sf.backend()
-        self.run['project_info'] = {key: hp_data[key] for key in proj_keys}
-        self.run['outcomes'] = outcomes
-        self.run['model_params/validation'] = validation_params
+        self.run['backend'] = sf.backend()        
+        self.run['project_info'] = {key: stringify_unsupported(hp_data[key]) for key in proj_keys}
+        self.run['outcomes'] = str(outcomes) #Why?
+        self.run['model_params/validation'] = stringify_unsupported(validation_params)
         self._log_hp(hp_data, 'stage', 'stage')
         self._log_hp(hp_data, 'model_params/hp', 'hp')
         self._log_hp(hp_data, 'model_params/hp/pretrain', 'pretrain')
@@ -97,9 +98,14 @@ class NeptuneLog:
             self.run[run_key] = hp_data[hp_key]
         except KeyError:
             log.debug(f"Unable to log Neptune hp_data key '{hp_key}'")
+        except TypeError:
+            print("HERE!!!")
+            self.run[run_key] = stringify_unsupported(hp_data[hp_key])
+        else:
+            print("NO ERROR")
 
 
-def list_log(run: "neptune.Run", label: str, val: Any, **kwargs: Any) -> None:
+def list_log(run:"neptune.Run", label: str, val: Any, **kwargs: Any) -> None:
     # If only one value for a metric, log to .../[metric]
     # If more than one value for a metric (e.g. AUC for each category),
     # log to .../[metric]/[i]
