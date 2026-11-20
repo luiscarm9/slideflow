@@ -1,8 +1,8 @@
 #!/bin/bash -l
 #SBATCH --job-name=sf-gpu-audit
-#SBATCH --partition=a100
-#SBATCH --gres=gpu:a100:1
-#SBATCH --time=00:30:00
+#SBATCH --partition=a40
+#SBATCH --gres=gpu:a40:1
+#SBATCH --time=00:25:00
 #SBATCH --export=NONE
 #SBATCH --output=/anvme/workspace/iwi5150h-slideflow_ci/logs/sf-gpu-%j.out
 #SBATCH --error=/anvme/workspace/iwi5150h-slideflow_ci/logs/sf-gpu-%j.err

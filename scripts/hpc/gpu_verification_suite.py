@@ -141,7 +141,6 @@ def test_gpu_tile_trainer_classification_and_eval(gpu_project_env):
         epochs=1,
         batch_size=16,
         model="resnet18",
-        pretrain=None,
         learning_rate=1e-3,
         hidden_layers=1,
         hidden_layer_width=64,
@@ -153,6 +152,7 @@ def test_gpu_tile_trainer_classification_and_eval(gpu_project_env):
         params=hp,
         dataset=train_dts,
         val_dataset=val_dts,
+        pretrain=None,
         exp_label="gpu_cls_smoke",
         steps_per_epoch_override=5,
         validate_on_batch=5,
@@ -170,7 +170,7 @@ def test_gpu_bag_generation_and_mil_architectures(gpu_project_env):
     dataset = gpu_project_env["dataset"]
     bags_dir = join(gpu_project_env["root"], "bags_resnet18")
 
-    extractor = sf.build_feature_extractor("resnet18", tile_px=128, pretrain=None, device="cuda")
+    extractor = sf.build_feature_extractor("resnet18_imagenet", tile_px=128, device="cuda")
     P.generate_feature_bags(extractor, dataset, outdir=bags_dir)
 
     train_dts = dataset.filter({"dataset": ["TRAIN"]})
