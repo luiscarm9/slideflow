@@ -42,11 +42,18 @@ echo "Target Ref  : ${TARGET_REF}"
 echo "Container   : ${SIF_IMAGE}"
 echo "Scratch Dir : ${TMPDIR}"
 
-# Stage repository cleanly into node-local NVMe SSD ($TMPDIR)
+# Stage repository cleanly into node-local NVMe SSD ($TMPDIR) without git-lfs host filter dependency
 STAGE_REPO="${TMPDIR}/slideflow-src"
-git clone --shared "${REPO_SRC}" "${STAGE_REPO}"
+export GIT_LFS_SKIP_SMUDGE=1
+GIT_NO_LFS=(git -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false)
+
+"${GIT_NO_LFS[@]}" clone --no-checkout --shared "${REPO_SRC}" "${STAGE_REPO}"
 cd "${STAGE_REPO}"
-git checkout --detach "${TARGET_REF}"
+if "${GIT_NO_LFS[@]}" rev-parse --verify --quiet "origin/${TARGET_REF}" >/dev/null; then
+    "${GIT_NO_LFS[@]}" checkout --detach "origin/${TARGET_REF}"
+else
+    "${GIT_NO_LFS[@]}" checkout --detach "${TARGET_REF}"
+fi
 COMMIT_SHA="$(git rev-parse --short HEAD)"
 echo "Checked out : ${COMMIT_SHA} ($(git log -1 --pretty=%s))"
 

@@ -141,7 +141,7 @@ setuptools.setup(
         'protobuf>=3.20,<5',
         'tensorboard',
         'crc32c',
-        'numpy<2.0',
+        'numpy',
         'tabulate',
         'rasterio',
         'rich',
@@ -156,7 +156,7 @@ setuptools.setup(
         'zarr',
         'gdown',
         'triangle',
-        'pyarrow<20',
+        'pyarrow',
         'filetype',
     ],
     extras_require={

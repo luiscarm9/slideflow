@@ -292,9 +292,9 @@ def aggregate_trainval_bags_by_patient(
 
     # Identify the bag indices of the training and validation patients.
     train_idx = np.array([i for i, sublist in enumerate(bags)
-                            if path_to_name(sublist[0]) in train_slides])
+                            if path_to_name(sublist[0]) in train_slides], dtype=int)
     val_idx = np.array([i for i, sublist in enumerate(bags)
-                        if path_to_name(sublist[0]) in val_slides])
+                        if path_to_name(sublist[0]) in val_slides], dtype=int)
 
     # Write patient/bag manifest
     if log_manifest is not None:
@@ -339,7 +339,7 @@ def get_labels(
         for dts in datasets:
             _labels, _unique = dts.labels(outcomes, format=format)
             labels.update(_labels)
-            all_unique.append(_unique)
+            all_unique += _unique
         unique = np.unique(all_unique)
     else:
         for dts in datasets:
@@ -514,7 +514,7 @@ def _verify_compatible_tile_size(mil_path: str, bag_path: str, strict: bool = Fa
     msg = None
     if not exists(join(mil_path, 'mil_params.json')):
         msg = f"Could not find mil_params.json at {mil_path}; unable to verify tile size compatibility."
-    if not exists(join(bag_path, 'bags_config.json')):
+    if msg is None and not exists(join(bag_path, 'bags_config.json')):
         msg = f"Could not find bags_config.json at {bag_path}; unable to verify tile size compatibility."
     if msg and strict:
         raise errors.IncompatibleTileSizeError(msg)
@@ -630,4 +630,4 @@ def _export_attention(
             out_path = join(dest, f'{slide}_att.npy')
             np.save(out_path, att)
 
-    log.info(f"Attention scores exported to [green]{out_path}[/]")
+    log.info(f"Attention scores exported to [green]{dest}[/]")
