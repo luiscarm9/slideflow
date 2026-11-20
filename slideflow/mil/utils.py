@@ -292,9 +292,9 @@ def aggregate_trainval_bags_by_patient(
 
     # Identify the bag indices of the training and validation patients.
     train_idx = np.array([i for i, sublist in enumerate(bags)
-                            if path_to_name(sublist[0]) in train_slides])
+                            if path_to_name(sublist[0]) in train_slides], dtype=int)
     val_idx = np.array([i for i, sublist in enumerate(bags)
-                        if path_to_name(sublist[0]) in val_slides])
+                        if path_to_name(sublist[0]) in val_slides], dtype=int)
 
     # Write patient/bag manifest
     if log_manifest is not None:

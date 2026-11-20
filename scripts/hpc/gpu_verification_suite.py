@@ -69,7 +69,7 @@ def gpu_project_env(tmp_path_factory):
     anns_path = str(root / "annotations.csv")
     with open(anns_path, "w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["patient", "slide", "dataset", "category", "ordinal_grade", "continuous", "time", "event"])
+        writer.writerow(["patient", "slide", "split", "category", "ordinal_grade", "continuous", "time", "event"])
         for idx in range(6):
             writer.writerow([
                 f"pt_{idx}",
@@ -132,8 +132,8 @@ def test_gpu_stain_normalizers():
 def test_gpu_tile_trainer_classification_and_eval(gpu_project_env):
     """Train and evaluate a PyTorch tile-based ResNet18 classifier on H100 GPU."""
     P = gpu_project_env["project"]
-    train_dts = gpu_project_env["dataset"].filter({"dataset": ["TRAIN"]})
-    val_dts = gpu_project_env["dataset"].filter({"dataset": ["VAL"]})
+    train_dts = gpu_project_env["dataset"].filter({"split": ["TRAIN"]})
+    val_dts = gpu_project_env["dataset"].filter({"split": ["VAL"]})
 
     hp = sf.ModelParams(
         tile_px=128,
@@ -173,8 +173,8 @@ def test_gpu_bag_generation_and_mil_architectures(gpu_project_env):
     extractor = sf.build_feature_extractor("resnet18_imagenet", tile_px=128, device="cuda")
     P.generate_feature_bags(extractor, dataset, outdir=bags_dir)
 
-    train_dts = dataset.filter({"dataset": ["TRAIN"]})
-    val_dts = dataset.filter({"dataset": ["VAL"]})
+    train_dts = dataset.filter({"split": ["TRAIN"]})
+    val_dts = dataset.filter({"split": ["VAL"]})
 
     for arch in ("attention_mil", "transmil"):
         mil_out = join(gpu_project_env["root"], f"mil_{arch}")
