@@ -4,8 +4,6 @@ import cv2
 import threading
 import multiprocessing as mp
 import numpy as np
-import cellpose
-import cellpose.models
 import logging
 import slideflow as sf
 import zarr
@@ -19,8 +17,16 @@ from tqdm import tqdm
 from typing import Tuple, Union, Callable, Optional, Iterable, TYPE_CHECKING, List
 from functools import partial
 from PIL import Image, ImageDraw
-from cellpose.models import Cellpose
-from cellpose import transforms, plot, dynamics
+
+try:
+    import cellpose
+    import cellpose.models
+    from cellpose.models import Cellpose
+    from cellpose import transforms, plot, dynamics
+except ImportError:
+    cellpose = None
+    Cellpose = None
+    transforms = plot = dynamics = None
 
 from slideflow.segment.utils import outlines_list
 from slideflow.slide.utils import draw_roi
@@ -90,13 +96,13 @@ class Segmentation:
                 through :meth:`slideflow.cellseg.Segmentation.save`.
 
         """
-        loaded = zarr.load(path)
+        loaded = seg_utils.load_zarr_arrays(path)
         if 'masks' not in loaded:
             raise TypeError(f"Unable to load '{path}'; 'masks' index not found.")
         flows = None if 'flows' not in loaded else loaded['flows']
         obj = cls(slide=None, masks=loaded['masks'], flows=flows)
-        obj.wsi_dim = loaded['wsi_dim']
-        obj.wsi_offset = loaded['wsi_offset']
+        obj.wsi_dim = loaded.get('wsi_dim')
+        obj.wsi_offset = loaded.get('wsi_offset')
         if 'centroids' in loaded:
             obj._centroids = loaded['centroids']
         return obj

@@ -235,3 +235,33 @@ def test_pr466_hoptimus0_roi_and_plugins(synthetic_wsi_env):
     wsi.load_roi_array(coords)
     areas = wsi.roi_area()
     assert len(areas) == 1 and areas[0] > 0.0
+
+
+def test_pr450_zarr_compressed_segmentation_and_outlines(tmp_path):
+    """Verify PR #450 Zarr v2/v3 save_zarr_compressed, Segmentation .zip round-trip, and fast_outlines_list."""
+    from slideflow.cellseg import Segmentation, seg_utils
+
+    masks = np.zeros((64, 64), dtype=np.int32)
+    masks[10:26, 10:26] = 1
+    masks[34:54, 30:50] = 2
+
+    # 1. Direct positional + keyword Zarr .zip round-trip
+    zarr_zip = str(tmp_path / "test_arrays.zip")
+    seg_utils.save_zarr_compressed(zarr_zip, np.arange(5), masks=masks, meta=np.array([1024, 1024]))
+    loaded = seg_utils.load_zarr_arrays(zarr_zip)
+    assert np.array_equal(loaded["arr_0"], np.arange(5))
+    assert np.array_equal(loaded["masks"], masks)
+    assert np.array_equal(loaded["meta"], np.array([1024, 1024]))
+
+    # 2. Full Segmentation.save() / Segmentation.load() .zip round-trip
+    seg_zip = str(tmp_path / "cell_masks.zip")
+    seg = Segmentation(masks=masks, wsi_dim=(640, 640), wsi_offset=(0, 0))
+    seg.save(seg_zip, centroids=True, flows=False)
+    seg_reloaded = Segmentation.load(seg_zip)
+    assert np.array_equal(seg_reloaded.masks, masks)
+    assert tuple(seg_reloaded.wsi_dim) == (640, 640)
+
+    # 3. Multithreaded contour extraction
+    outlines = seg_utils.fast_outlines_list(masks, num_threads=2)
+    assert len(outlines) == 2
+    assert all(o.ndim == 2 and o.shape[1] == 2 and o.shape[0] > 4 for o in outlines)
