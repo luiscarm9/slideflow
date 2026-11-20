@@ -231,7 +231,7 @@ def test_pr466_hoptimus0_roi_and_plugins(synthetic_wsi_env):
     roi_copy = copy.deepcopy(roi)
     assert roi_copy.name == roi.name and pytest.approx(roi_copy.area(), rel=1e-3) == roi.area()
 
-    wsi = sf.WSI(synthetic_wsi_env["slide_paths"][0], tile_px=128, tile_um=128, roi_method="ignore")
+    wsi = sf.WSI(synthetic_wsi_env["slide_paths"][0], tile_px=128, tile_um=128, roi_method="auto")
     wsi.load_roi_array(coords)
     areas = wsi.roi_area()
     assert len(areas) == 1 and areas[0] > 0.0

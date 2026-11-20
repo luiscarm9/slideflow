@@ -52,7 +52,7 @@ From: dockerhub-mirror.rrze.uni-erlangen.de/pytorch/pytorch:2.4.1-cuda12.4-cudnn
     python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel "versioneer[toml]"
 
     python3 -m pip install --no-cache-dir \
-        "numpy>=1.26,<2.0" \
+        "numpy>=2.0" \
         "gast>=0.3.3" \
         scipy \
         scikit-learn \
@@ -94,7 +94,7 @@ From: dockerhub-mirror.rrze.uni-erlangen.de/pytorch/pytorch:2.4.1-cuda12.4-cudnn
         segmentation-models-pytorch \
         gdown \
         triangle \
-        "pyarrow<20" \
+        pyarrow \
         filetype \
         cupy-cuda12x \
         cucim-cu12 \
