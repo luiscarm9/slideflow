@@ -1,18 +1,18 @@
-import versioneer
+import importlib.metadata
 import setuptools
-import pkg_resources
+import versioneer
 
 
 # Check for existing OpenCV installation
 opencv_pkg = None
 try:
-    pkg_resources.get_distribution("opencv-python-headless")
+    importlib.metadata.distribution("opencv-python-headless")
     opencv_pkg = "opencv-python-headless"
-except pkg_resources.DistributionNotFound:
+except importlib.metadata.PackageNotFoundError:
     try:
-        pkg_resources.get_distribution("opencv-python")
+        importlib.metadata.distribution("opencv-python")
         opencv_pkg = "opencv-python"
-    except pkg_resources.DistributionNotFound:
+    except importlib.metadata.PackageNotFoundError:
         opencv_pkg = "opencv-python-headless"  # Default to headless if neither is installed
 
 
@@ -138,14 +138,12 @@ setuptools.setup(
         'scikit-image',
         'tqdm',
         'click',
-        'protobuf<3.21',
+        'protobuf>=3.20,<5',
         'tensorboard',
         'crc32c',
-        'numpy',
+        'numpy<2.0',
         'tabulate',
-		'rasterio',
-        'smac==1.4.0',
-        'ConfigSpace',
+        'rasterio',
         'rich',
         'pillow>=6.0.0',
         'imgui>=2.0.0',
@@ -158,7 +156,8 @@ setuptools.setup(
         'zarr',
         'gdown',
         'triangle',
-        'pyarrow'
+        'pyarrow<20',
+        'filetype',
     ],
     extras_require={
         'tf': [
@@ -170,14 +169,20 @@ setuptools.setup(
             'torch',
             'torchvision',
             'pretrainedmodels',
-            'cellpose<2.2',
-            'spacy<3.8',
+            'spacy<3.9',
             'fastai',
             'pytorch-lightning',
             'timm',
             'segmentation-models-pytorch'
         ],
+        'smac': [
+            'smac>=1.4.0',
+            'ConfigSpace',
+        ],
         'dev': [
+            'pytest',
+            'pytest-cov',
+            'flake8',
             'sphinx',
             'sphinx-markdown-tables',
             'sphinxcontrib-video',
@@ -187,10 +192,10 @@ setuptools.setup(
             'cucim'
         ],
         'cellpose': [
-            'cellpose<2.2',
+            'cellpose',
         ],
         'all': [
-            'cellpose<2.2',
+            'cellpose',
             'cucim',
             'sphinx',
             'sphinx-markdown-tables',
@@ -198,12 +203,12 @@ setuptools.setup(
             'pygments-csv-lexer',
             'torch',
             'torchvision',
-            'spacy<3.8',
+            'spacy<3.9',
             'fastai',
             'pretrainedmodels',
-            'tensorflow>=2.7,<2.12',
-            'tensorflow_probability<0.20',
-            'tensorflow_datasets',
+            'pytorch-lightning',
+            'timm',
+            'segmentation-models-pytorch',
         ]
     },
 )

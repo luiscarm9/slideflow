@@ -1,0 +1,151 @@
+name: Slideflow CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint-and-package:
+    name: Static Analysis & Wheel Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install lint and build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install flake8 build twine "versioneer[toml]"
+
+      - name: Strict Flake8 gate (syntax & undefined names)
+        run: |
+          flake8 slideflow setup.py scripts --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Code complexity & style telemetry
+        run: |
+          WARN_COUNT=$(flake8 slideflow --count --exit-zero --max-complexity=12 --max-line-length=127 -q | tail -n 1 || echo "0")
+          {
+            echo "### Static Analysis & Packaging Summary"
+            echo "- **Strict Gate (\`E9,F63,F7,F82\`)**: Passed (0 syntax / undefined-symbol errors)"
+            echo "- **Advisory Style/Complexity Warnings**: \`${WARN_COUNT}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build sdist & wheel distributions
+        run: |
+          python -m build
+          twine check dist/*
+          {
+            echo "- **Distribution Build (\`sdist\` + \`bdist_wheel\` + \`twine check\`)**: Passed"
+            echo ""
+            echo "#### Built Artifacts"
+            for f in dist/*; do
+              echo "- \`$(basename "$f")\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  cpu-test-matrix:
+    name: PyTorch CPU & WSI Suite (Py ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: lint-and-package
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+    env:
+      SF_BACKEND: torch
+      SF_SLIDE_BACKEND: libvips
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system WSI dependencies (Libvips & OpenSlide)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libvips-dev \
+            libvips-tools \
+            openslide-tools \
+            libopenslide-dev \
+            libgl1 \
+            libglib2.0-0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install Slideflow (PyTorch CPU) & test dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          python -m pip install -e ".[torch,dev]"
+
+      - name: Verify Slideflow runtime configuration
+        run: |
+          python -c "import slideflow as sf, torch, pyvips; sf.about(); print('PyTorch:', torch.__version__, 'Libvips:', pyvips.__version__)"
+
+      - name: Execute Unit & Synthetic WSI PyTorch Verification Suite
+        run: |
+          pytest \
+            slideflow/test/dataset_test.py \
+            slideflow/test/stats_test.py \
+            slideflow/test/norm_test.py \
+            scripts/ci/cpu_verification_suite.py \
+            -v \
+            --junitxml="pytest-cpu-py${{ matrix.python-version }}.xml"
+
+      - name: Publish Test Summary
+        if: always()
+        run: |
+          python3 - "pytest-cpu-py${{ matrix.python-version }}.xml" "${{ matrix.python-version }}" >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          import os, sys, xml.etree.ElementTree as ET
+          xml_path, py_ver = sys.argv[1], sys.argv[2]
+          print(f"### PyTorch CPU Verification — Python {py_ver}")
+          if not os.path.exists(xml_path):
+              print("> JUnit XML report was not generated.")
+              sys.exit(0)
+          root = ET.parse(xml_path).getroot()
+          suites = root.findall("testsuite") if root.tag == "testsuites" else [root]
+          tests = sum(int(s.attrib.get("tests", 0)) for s in suites)
+          failures = sum(int(s.attrib.get("failures", 0)) for s in suites)
+          errors = sum(int(s.attrib.get("errors", 0)) for s in suites)
+          skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
+          time_s = sum(float(s.attrib.get("time", 0.0)) for s in suites)
+          passed = tests - failures - errors - skipped
+          status = "PASSED" if (failures == 0 and errors == 0) else "FAILED"
+          print("| Status | Total | Passed | Failed | Errors | Skipped | Duration |")
+          print("| :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
+          print(f"| **{status}** | {tests} | {passed} | {failures} | {errors} | {skipped} | {time_s:.1f}s |")
+          EOF
+
+      - name: Upload JUnit XML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-cpu-py${{ matrix.python-version }}
+          path: pytest-cpu-py${{ matrix.python-version }}.xml

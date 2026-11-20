@@ -137,7 +137,7 @@ def build_learner(
 
     # Loss should weigh inversely to class occurences.
     if config.is_classification() and config.weighted_loss:
-        counts = pd.value_counts(targets[train_idx])
+        counts = pd.Series(np.asarray(targets[train_idx]).ravel()).value_counts()
         weights = counts.sum() / counts
         weights /= weights.sum()
         weights = torch.tensor(

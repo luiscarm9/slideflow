@@ -1904,10 +1904,10 @@ class Trainer:
 
         if self.use_tensorboard:
             from google.protobuf import __version__ as protobuf_version
-            if version.parse(protobuf_version) >= version.parse('3.21'):
+            if version.parse(protobuf_version) >= version.parse('5.0'):
                 log.warning(
-                    "Tensorboard is incompatible with protobuf >= 3.21."
-                    "Downgrade protobuf to enable tensorboard logging."
+                    "Tensorboard may be incompatible with protobuf >= 5.0. "
+                    "Downgrade to protobuf < 5 to enable tensorboard logging."
                 )
                 self.use_tensorboard = False
 
