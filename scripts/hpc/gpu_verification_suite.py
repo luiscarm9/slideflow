@@ -171,7 +171,7 @@ def test_gpu_bag_generation_and_mil_architectures(gpu_project_env):
     bags_dir = join(gpu_project_env["root"], "bags_resnet18")
 
     extractor = sf.build_feature_extractor("resnet18_imagenet", tile_px=128, device="cuda")
-    P.generate_feature_bags(extractor, dataset, outdir=bags_dir)
+    P.generate_feature_bags(extractor, dataset, outdir=bags_dir, min_tiles=1)
 
     train_dts = dataset.filter({"split": ["TRAIN"]})
     val_dts = dataset.filter({"split": ["VAL"]})
