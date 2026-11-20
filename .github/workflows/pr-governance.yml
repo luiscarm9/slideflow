@@ -1,0 +1,68 @@
+name: PR Governance & Audit Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  governance:
+    name: PR Metadata & Audit Readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate PR structure & traceability
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 - << 'EOF'
+          import os, re, sys
+
+          title = os.environ.get("PR_TITLE", "").strip()
+          body = os.environ.get("PR_BODY") or ""
+          branch = os.environ.get("PR_BRANCH", "")
+          pr_num = os.environ.get("PR_NUMBER", "")
+
+          checks = []
+          has_summary = bool(re.search(r"^##+\s+Summary", body, re.M | re.I))
+          checks.append(("Summary section (`## Summary`)", has_summary, True))
+
+          has_verification = bool(re.search(r"^##+\s+(Verification|Testing|Test Plan)", body, re.M | re.I))
+          checks.append(("Verification section (`## Verification`)", has_verification, True))
+
+          is_upstream_audit = branch.startswith("pr-audit/")
+          has_upstream_ref = bool(re.search(r"(slideflow/slideflow#\d+|github\.com/slideflow/slideflow/pull/\d+|Upstream PR\s*:\s*#?\d+)", body, re.I))
+          checks.append((
+              "Upstream PR traceability (`pr-audit/*` branches)",
+              (not is_upstream_audit) or has_upstream_ref,
+              is_upstream_audit,
+          ))
+
+          has_gpu_section = bool(re.search(r"(Helma|GPU Verification|Slurm)", body, re.I))
+          checks.append(("HPC / GPU verification section present", has_gpu_section, False))
+
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+          with open(summary_path, "a", encoding="utf-8") as fh:
+              fh.write(f"### PR #{pr_num} Governance & Traceability Check\n\n")
+              fh.write(f"- **Title**: `{title}`\n")
+              fh.write(f"- **Branch**: `{branch}`\n\n")
+              fh.write("| Check | Required | Result |\n")
+              fh.write("| :--- | :---: | :---: |\n")
+              failed_required = False
+              for name, ok, req in checks:
+                  req_str = "Yes" if req else "Advisory"
+                  res_str = "Pass" if ok else ("FAIL" if req else "Pending")
+                  fh.write(f"| {name} | {req_str} | **{res_str}** |\n")
+                  if req and not ok:
+                      failed_required = True
+
+          if failed_required:
+              print("One or more required PR governance sections are missing. See job summary.", file=sys.stderr)
+              sys.exit(1)
+          EOF

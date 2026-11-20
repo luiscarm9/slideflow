@@ -1,0 +1,106 @@
+Bootstrap: docker
+From: dockerhub-mirror.rrze.uni-erlangen.de/pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+
+%labels
+    Author luiscarm9
+    Project slideflow-maintained-fork
+    Cluster NHR-FAU-Helma-H100
+    Description Immutable Slideflow PyTorch + CuCIM + Libvips + Foundation Model runtime for NHR@FAU Helma (1-inode .sif)
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export SF_BACKEND=torch
+    export PYTHONNOUSERSITE=1
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=Etc/UTC
+    export http_proxy="http://proxy.nhr.fau.de:80"
+    export https_proxy="http://proxy.nhr.fau.de:80"
+    export HTTP_PROXY="${http_proxy}"
+    export HTTPS_PROXY="${https_proxy}"
+    export no_proxy="localhost,127.0.0.1,.fau.de,.uni-erlangen.de"
+    export NO_PROXY="${no_proxy}"
+
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        libblas-dev \
+        libexif-dev \
+        libexpat1-dev \
+        libgl1 \
+        libglib2.0-dev \
+        libgsf-1-dev \
+        libjpeg-turbo8-dev \
+        liblapack-dev \
+        libopenjp2-7-dev \
+        libopenslide-dev \
+        libpng-dev \
+        libsm6 \
+        libtiff-dev \
+        libvips-dev \
+        libvips-tools \
+        libxext6 \
+        openslide-tools \
+        pkg-config \
+        wget \
+        && rm -rf /var/lib/apt/lists/*
+
+    python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel "versioneer[toml]"
+
+    python3 -m pip install --no-cache-dir \
+        "numpy>=1.26,<2.0" \
+        "gast>=0.3.3" \
+        scipy \
+        scikit-learn \
+        "matplotlib>=3.5" \
+        imageio \
+        opencv-python-headless \
+        shapely \
+        umap-learn \
+        "seaborn<0.14" \
+        pandas \
+        "pyvips>=2.2.0" \
+        fpdf2 \
+        pretrainedmodels \
+        gitpython \
+        scikit-image \
+        tqdm \
+        click \
+        "protobuf>=3.20,<5" \
+        tensorboard \
+        crc32c \
+        tabulate \
+        saliency \
+        rasterio \
+        rich \
+        "pillow>=9.0.0" \
+        "imgui>=2.0.0" \
+        pyopengl \
+        glfw \
+        parameterized \
+        pyperclip \
+        requests \
+        zarr \
+        "spacy<3.9" \
+        fastai \
+        pytorch-lightning \
+        "timm>=1.0.9" \
+        huggingface_hub \
+        safetensors \
+        segmentation-models-pytorch \
+        gdown \
+        triangle \
+        pyarrow \
+        filetype \
+        cupy-cuda12x \
+        cucim-cu12 \
+        pytest \
+        pytest-cov \
+        flake8
+
+%runscript
+    exec "$@"

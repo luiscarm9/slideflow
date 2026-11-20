@@ -1,37 +1,31 @@
-name: pypi package
+name: Publish to PyPI
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build-n-publish:
-    name: Build and publish Python 🐍 distributions 📦 to PyPI
-    runs-on: ubuntu-20.04
-    
+  build-and-publish:
+    name: Build & Publish Distributions to PyPI
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@master
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v1
-      with:
-        python-version: 3.8
-    - name: Install libvips
-      run: sudo apt-get install -y libvips
-    - name: Install pypa/build
-      run: >-
-        python -m
-        pip install -r requirements.txt
-        --user
-    - name: Initialize submodule
-      run: >-
-        git submodule init
-    - name: Update submodule
-      run: >-
-        git submodule update --remote --recursive
-    - name: Build a binary wheel
-      run: >-
-        python
-        setup.py
-        bdist_wheel
-    - name: Publish distribution 📦 to PyPI
-      uses: pypa/gh-action-pypi-publish@master
-      with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip build twine "versioneer[toml]"
+      - name: Build distributions
+        run: |
+          python -m build
+          twine check dist/*
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
