@@ -48,6 +48,47 @@ def train(learner, config, callbacks=None):
         learner.fit(n_epoch=config.epochs, lr=lr, wd=config.wd, cbs=cbs)
     return learner
 
+class OrdinalClassEncoder:
+    """Encode categorical features as cumulative ordinal threshold vectors.
+
+    For k sorted classes, creates k-1 binary bits:
+    - Class 0: [0, 0, ..., 0]
+    - Class 1: [0, ..., 0, 1]
+    - ...
+    - Class k-1: [1, 1, ..., 1]
+    """
+
+    def __init__(self):
+        self.categories_ = None
+        self.ordinal_map_ = None
+
+    @staticmethod
+    def _validate_1d_column(X) -> np.ndarray:
+        arr = np.asarray(X)
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        if arr.ndim != 2 or arr.shape[1] != 1:
+            raise ValueError("X should have shape (n_samples, 1)")
+        return arr[:, 0]
+
+    def fit(self, X):
+        col = self._validate_1d_column(X)
+        cats = np.unique(col)
+        if len(cats) < 2:
+            raise ValueError("Ordinal classification requires at least 2 unique classes.")
+        self.categories_ = [cats]
+        num_bits = len(cats) - 1
+        self.ordinal_map_ = {
+            cat: [1.0 if j >= (num_bits - i) else 0.0 for j in range(num_bits)]
+            for i, cat in enumerate(cats)
+        }
+        return self
+
+    def transform(self, X) -> np.ndarray:
+        col = self._validate_1d_column(X)
+        return np.asarray([self.ordinal_map_[x] for x in col], dtype=np.float32)
+
+
 # -----------------------------------------------------------------------------
 
 def build_learner(
@@ -98,6 +139,8 @@ def build_learner(
 
     if config.is_classification():
         encoder = OneHotEncoder(**oh_kw).fit(unique_categories.reshape(-1, 1))
+    elif config.model_type == 'ordinal':
+        encoder = OrdinalClassEncoder().fit(unique_categories.reshape(-1, 1))
     else:
         encoder = None
 

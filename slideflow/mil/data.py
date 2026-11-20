@@ -18,7 +18,7 @@ def build_dataset(bags, targets, encoder, bag_size, use_lens=False,  max_bag_siz
 
     def _zip(bag, targets):
         features, lengths = bag
-        _targets = targets if encoder is None else targets.squeeze()
+        _targets = targets if encoder is None else targets.squeeze(0)
         if use_lens:
             return (features, lengths, _targets)
         else:
@@ -37,7 +37,7 @@ def build_multibag_dataset(bags, targets, encoder, bag_size, use_lens=False, max
     n_bags = len(bags[0])
 
     def _zip(bags_and_lengths, targets):
-        _targets = targets if encoder is None else targets.squeeze()
+        _targets = targets if encoder is None else targets.squeeze(0)
         if use_lens:
             return *bags_and_lengths, _targets
         else:
