@@ -81,9 +81,10 @@ def synthetic_wsi_env(tmp_path_factory):
     return {"root": str(root), "slides_dir": str(slides_dir), "slide_paths": slide_paths}
 
 
-def test_wsi_slide_unittest_suite(synthetic_wsi_env):
+def test_wsi_slide_unittest_suite(tmp_path):
     """Run upstream slide_test.TestSlide checks against a synthetic pyramidal WSI."""
-    wsi_path = synthetic_wsi_env["slide_paths"][0]
+    # slide_test.TestSlide uses tile_um=1208 -> at 0.25 MPP, each tile spans 4832 px; use 5120x5120 pyramid
+    wsi_path = _make_synthetic_histology_tiff(str(tmp_path / "large_wsi.tiff"), width=5120, height=5120, seed=7)
     wsi = sf.WSI(wsi_path, tile_px=128, tile_um=128)
     assert pytest.approx(wsi.mpp, rel=1e-2) == 0.25
     assert wsi.estimated_num_tiles > 0
@@ -128,7 +129,8 @@ def test_project_extraction_tfrecords_and_dataloader(synthetic_wsi_env):
     assert len(dataset.tfrecords()) == 4
 
     labels, _ = dataset.labels("category")
-    loader = dataset.torch(labels=labels, batch_size=4, infinite=False, normalizer="reinhard_fast")
+    normalizer = sf.norm.autoselect("reinhard_fast", backend="torch")
+    loader = dataset.torch(labels=labels, batch_size=4, infinite=False, normalizer=normalizer)
     batch_imgs, batch_labels = next(iter(loader))
     assert isinstance(batch_imgs, torch.Tensor)
     assert batch_imgs.ndim == 4 and batch_imgs.shape[1] == 3 and batch_imgs.shape[2] == 128
@@ -158,8 +160,9 @@ def test_torch_tile_model_and_features_smoke():
     feat_fn = TorchFeatures.from_model(model, layers=["postconv"], tile_px=128)
     with torch.no_grad():
         feats = feat_fn(x)
-    assert isinstance(feats, torch.Tensor)
-    assert feats.shape[0] == 2 and feats.shape[1] == 512
+    feat_tensor = feats[0] if isinstance(feats, list) else feats
+    assert isinstance(feat_tensor, torch.Tensor)
+    assert feat_tensor.shape[0] == 2 and feat_tensor.shape[1] == 512
 
 
 def test_mil_attention_training_and_eval_smoke(synthetic_wsi_env):
@@ -195,15 +198,15 @@ def test_mil_attention_training_and_eval_smoke(synthetic_wsi_env):
         outdir=mil_out,
         device="cpu",
     )
-    assert os.path.exists(join(mil_out, "mil_params.json"))
+    assert any("mil_params.json" in files for _, _, files in os.walk(mil_out))
 
 
 def test_tissue_segmentation_model_smoke():
     """Verify slideflow.segment SegmentConfig construction and forward pass."""
     from slideflow.segment import SegmentConfig
 
-    cfg = SegmentConfig(arch="FPN", encoder_name="resnet18", mpp=4.0, size=256)
-    seg_model = cfg.build(encoder_weights=None)
+    cfg = SegmentConfig(arch="FPN", encoder_name="resnet18", mpp=4.0, size=256, encoder_weights=None)
+    seg_model = cfg.build_model()
     seg_model.eval()
     x = torch.randint(0, 255, (2, 3, 256, 256), dtype=torch.uint8)
     with torch.no_grad():

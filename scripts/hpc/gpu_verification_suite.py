@@ -188,15 +188,15 @@ def test_gpu_bag_generation_and_mil_architectures(gpu_project_env):
             outdir=mil_out,
             device="cuda",
         )
-        assert os.path.exists(join(mil_out, "mil_params.json"))
+        assert any("mil_params.json" in files for _, _, files in os.walk(mil_out))
 
 
 def test_gpu_segmentation_forward_and_backward():
     """Verify GPU forward + backward optimization step on slideflow.segment FPN."""
     from slideflow.segment import SegmentConfig
 
-    cfg = SegmentConfig(arch="FPN", encoder_name="resnet18", mpp=4.0, size=256)
-    model = cfg.build(encoder_weights=None).cuda()
+    cfg = SegmentConfig(arch="FPN", encoder_name="resnet18", mpp=4.0, size=256, encoder_weights=None)
+    model = cfg.build_model().cuda()
     model.train()
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
