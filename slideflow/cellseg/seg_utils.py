@@ -3,8 +3,9 @@ import cv2
 import numpy as np
 import multiprocessing as mp
 import slideflow as sf
+from functools import partial
 from os.path import dirname, join, exists, isfile
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 import zarr
 
 _ZARR_V3 = int(zarr.__version__.split('.')[0]) >= 3
@@ -126,10 +127,59 @@ def fast_outlines_list(masks, num_threads: Optional[int] = None):
         return pool.map(get_mask_outline, np.unique(masks)[1:])
 
 
-# --- WSI QC classes ----------------------------------------------------------
+def sparse_split_indices(shape: int, splits: int):
+    if shape <= 1:
+        return []
+    step = max(1, int(shape / max(1, splits)))
+    ar = np.arange(1, shape, step)
+    if ar[-1] != shape:
+        ar = np.append(ar, shape)
+    return list(zip(ar[:-1], ar[1:]))
 
-class CellSegment:
-    def __init__(self, source: Optional[str] = None):
+
+def get_sparse_chunk_centroid(sparse_mask, shape):
+    return np.array([
+        np.mean(np.unravel_index(row.data, shape), 1).astype(np.int32)
+        if row.getnnz()
+        else (0, 0)
+        for row in sparse_mask
+    ])
+
+
+def get_sparse_centroid(mask, sparse_mask):
+    if sparse_mask.shape[0] <= 1:
+        return np.zeros((0, 2), dtype=np.int32)
+    n_proc = min(sf.util.num_cpu(default=8), max(1, sparse_mask.shape[0] - 1))
+    indices = sparse_split_indices(sparse_mask.shape[0], n_proc)
+    if n_proc == 1 or len(indices) <= 1:
+        return get_sparse_chunk_centroid(sparse_mask[1:], mask.shape)
+    with mp.Pool(n_proc) as pool:
+        return np.concatenate(
+            pool.map(
+                partial(get_sparse_chunk_centroid, shape=mask.shape),
+                [sparse_mask[i:j] for (i, j) in indices]
+            )
+        )
+
+
+def sparse_mask(mask):
+    from scipy.sparse import csr_matrix
+    raveled = np.ravel(mask)
+    nonzero = raveled > 0
+    if not np.any(nonzero):
+        return csr_matrix((1, 1), dtype=np.uint32)
+    cols = np.where(nonzero)[0]
+    return csr_matrix(
+        (cols, (raveled[nonzero], cols)),
+        shape=(int(mask.max()) + 1, int(cols[-1]) + 1),
+        dtype=(np.uint32 if (cols[-1] + 1) < 4294967295 else np.uint64)
+    )
+
+
+# --- WSI Cell Segmentation transformation utility ----------------------------
+
+class ApplySegmentation:
+    def __init__(self, source: Optional[str] = None) -> None:
         """
         QC function which loads a saved numpy mask to a WSI.
 
@@ -161,7 +211,6 @@ class CellSegment:
         """
         from slideflow.cellseg import Segmentation
 
-        # Determine the source path (if not provided, use the slide's directory)
         source = self.source if self.source is not None else dirname(wsi.path)
 
         if exists(source) and isfile(source):
@@ -173,3 +222,6 @@ class CellSegment:
         seg = Segmentation.load(mask_path)
         wsi.apply_segmentation(seg)
         return None
+
+
+CellSegment = ApplySegmentation
