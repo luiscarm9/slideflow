@@ -1,4 +1,4 @@
-numpy<2.0
+numpy
 gast>=0.3.3
 scipy
 scikit-learn
@@ -41,5 +41,5 @@ timm
 segmentation-models-pytorch
 gdown
 triangle
-pyarrow<20
+pyarrow
 filetype

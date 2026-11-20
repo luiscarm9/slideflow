@@ -212,3 +212,26 @@ def test_tissue_segmentation_model_smoke():
     with torch.no_grad():
         out = seg_model(x.float())
     assert out.shape == (2, 1, 256, 256)
+
+
+def test_pr466_hoptimus0_roi_and_plugins(synthetic_wsi_env):
+    """Verify Slideflow 3.1.0 (PR #466) additions: H-optimus-0 registry/weights_hash, ROI.area/deepcopy, WSI.roi_area."""
+    import copy
+    from slideflow.model import extractors
+    from slideflow.model.extractors.hoptimus0 import Hoptimus0Features
+    from slideflow.slide.utils import ROI
+
+    assert "hoptimus0" in extractors.list_extractors()
+    assert Hoptimus0Features.weights_hash == "105e006ee8fb2f51709a51432c1a273e35ed10d4"
+
+    coords = np.array([[100, 100], [500, 100], [500, 500], [100, 500]])
+    roi = ROI(name="tumor_box", coordinates=coords)
+    assert pytest.approx(roi.area(), rel=1e-3) == 160000.0
+
+    roi_copy = copy.deepcopy(roi)
+    assert roi_copy.name == roi.name and pytest.approx(roi_copy.area(), rel=1e-3) == roi.area()
+
+    wsi = sf.WSI(synthetic_wsi_env["slide_paths"][0], tile_px=128, tile_um=128, roi_method="ignore")
+    wsi.load_roi_array(coords)
+    areas = wsi.roi_area()
+    assert len(areas) == 1 and areas[0] > 0.0
