@@ -156,7 +156,7 @@ setuptools.setup(
         'zarr',
         'gdown',
         'triangle',
-        'pyarrow',
+        'pyarrow<20',
         'filetype',
     ],
     extras_require={

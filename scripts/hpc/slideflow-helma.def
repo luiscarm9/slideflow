@@ -94,7 +94,7 @@ From: dockerhub-mirror.rrze.uni-erlangen.de/pytorch/pytorch:2.4.1-cuda12.4-cudnn
         segmentation-models-pytorch \
         gdown \
         triangle \
-        pyarrow \
+        "pyarrow<20" \
         filetype \
         cupy-cuda12x \
         cucim-cu12 \

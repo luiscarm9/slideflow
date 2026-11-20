@@ -759,8 +759,10 @@ class _VIPSReader:
     ) -> Union[vips.Image, np.ndarray]:
         """Read a pyramid level."""
 
-        if self.properties['vips-loader'] == 'tiffload' and level is not None:
-            kwargs['page'] = self.levels[level]['level']
+        if self.properties['vips-loader'] == 'tiffload':
+            kwargs.pop('associated', None)
+            if level is not None:
+                kwargs['page'] = self.levels[level]['level']
         elif level is not None:
             kwargs['level'] = level
         image = vips.Image.new_from_file(self.path, fail=fail, access=access, **kwargs)
