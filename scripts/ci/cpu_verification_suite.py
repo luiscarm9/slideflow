@@ -541,7 +541,6 @@ def test_pr408_torch_cph_tile_survival_trainer(tmp_path):
         steps_per_epoch_override=2,
         use_tensorboard=False,
         mixed_precision=False,
-        num_workers=0,
     )
     assert len(res_single) == 1
     cph_dirs = [join(P.models_dir, d) for d in os.listdir(P.models_dir) if "cph_single" in d]
@@ -580,6 +579,5 @@ def test_pr408_torch_cph_tile_survival_trainer(tmp_path):
         steps_per_epoch_override=2,
         use_tensorboard=False,
         mixed_precision=False,
-        num_workers=0,
     )
     assert len(res_multi) == 1
