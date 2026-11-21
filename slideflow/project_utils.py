@@ -222,21 +222,25 @@ def _setup_input_labels(
         slides = list(labels.keys())
 
         if is_float:
+            if val_dts is not None:
+                val_labels, _ = val_dts.labels(inpt, use_float=True)
+                combined_float = {**val_labels, **labels}
+            else:
+                combined_float = labels
             feature_len[inpt] = 1
             inpt_classes[inpt] = 'float'
-            for slide in slides:
-                _label = labels[slide]
+            for slide, _label in combined_float.items():
                 if isinstance(_label, list) and len(_label) == 1:
                     _label = _label[0]
                 model_inputs[slide] += [_label]
         else:
             # Harmonize categorical labels with val_dts so one-hot
             # vectors account for categories that only appear in the
-            # validation set. Append val-only categories to keep dts's
-            # existing label indices valid.
+            # validation set, and populate model_inputs for val_dts slides.
             unique = list(unique)
+            val_name_labels = {}
             if val_dts is not None:
-                _, val_unique = val_dts.labels(inpt, use_float=False)
+                val_name_labels, val_unique = val_dts.labels(inpt, format='name')
                 for u in val_unique:
                     if u not in unique:
                         unique.append(u)
@@ -248,6 +252,12 @@ def _setup_input_labels(
                 )
                 # Concatenate onehot labels together
                 model_inputs[slide] += list(onehot_label)
+            for slide, cat_name in val_name_labels.items():
+                if slide not in labels:
+                    onehot_label = sf.util.to_onehot(
+                        unique.index(cat_name), len(unique)
+                    )
+                    model_inputs[slide] += list(onehot_label)
 
     feature_sizes = [feature_len[i] for i in inpt_headers]
     return inpt_classes, feature_sizes, model_inputs
