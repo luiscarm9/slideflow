@@ -3261,7 +3261,7 @@ class Dataset:
         if model_type not in ('classification', 'regression'):
             raise ValueError(
                 f"Invalid model_type {model_type}; must be either "
-                "'classification' or 'regression'"
+                "'classification', 'regression', or 'survival'"
             )
 
         # Prepare dataset
