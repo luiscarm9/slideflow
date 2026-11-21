@@ -600,7 +600,15 @@ def test_pr463_dual_magnification_extraction_and_features(tmp_path):
             writer.writerow([f"pt_{idx}", sname, "pos" if idx == 0 else "neg"])
 
     P = sf.create_project(root=str(tmp_path / "dual_proj"), slides=str(slides_dir), annotations=anns_path)
-    P.extract_tiles(tile_px=128, tile_um=64, qc=None, roi_method="ignore", num_threads=2)
+    P.extract_tiles(
+        tile_px=128,
+        tile_um=64,
+        qc=None,
+        roi_method="ignore",
+        whitespace_fraction=1.0,
+        grayspace_fraction=1.0,
+        num_threads=2,
+    )
 
     high_dts = P.dataset(tile_px=128, tile_um=64)
     assert len(high_dts.tfrecords()) == 2

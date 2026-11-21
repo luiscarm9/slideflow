@@ -93,10 +93,16 @@ def print_module_summary(
     hooks = [mod.register_forward_pre_hook(pre_hook) for mod in module.modules()]
     hooks += [mod.register_forward_hook(post_hook) for mod in module.modules()]
 
-    # Run module.
-    module(*inputs)
-    for hook in hooks:
-        hook.remove()
+    # Run module in eval/no_grad mode so summary inspection never mutates BatchNorm running stats.
+    was_training = module.training
+    module.eval()
+    try:
+        with torch.no_grad():
+            module(*inputs)
+    finally:
+        module.train(was_training)
+        for hook in hooks:
+            hook.remove()
 
     # Identify unique outputs, parameters, and buffers.
     tensors_seen = set()

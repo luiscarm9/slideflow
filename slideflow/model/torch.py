@@ -1308,12 +1308,12 @@ class Trainer:
         """Prints model summary and logs to neptune."""
         if self.model is None:
             raise ValueError("Model has not yet been initialized.")
-        empty_inp = [torch.empty(
+        empty_inp = [torch.zeros(
             [self.hp.batch_size, 3, train_dts.tile_px, train_dts.tile_px]
         )]
         if self.num_slide_features:
             empty_inp += [
-                torch.empty([self.hp.batch_size, self.num_slide_features])
+                torch.zeros([self.hp.batch_size, self.num_slide_features])
             ]
         if sf.getLoggingLevel() <= 20:
             model_summary = torch_utils.print_module_summary(
@@ -2181,12 +2181,12 @@ class SurvivalTrainer(Trainer):
         """Prints model summary and logs to neptune."""
         if self.model is None:
             raise ValueError("Model has not yet been initialized.")
-        empty_inp = [torch.empty(
+        empty_inp = [torch.zeros(
             [self.hp.batch_size, 3, train_dts.tile_px, train_dts.tile_px]
         )]
         if (self.num_slide_features - 1):
             empty_inp += [
-                torch.empty([self.hp.batch_size, (self.num_slide_features - 1)])
+                torch.zeros([self.hp.batch_size, (self.num_slide_features - 1)])
             ]
         if sf.getLoggingLevel() <= 20:
             model_summary = torch_utils.print_module_summary(
