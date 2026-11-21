@@ -418,7 +418,7 @@ def survival_metrics(
             else f'{c_index:.3f}'
         )
         log.info(f"C-index ({level}-level): {c_str}")
-    except ZeroDivisionError as e:
+    except (ZeroDivisionError, ValueError) as e:
         log.error(f"Error calculating concordance index: {e}")
         c_index = -1
     return {
