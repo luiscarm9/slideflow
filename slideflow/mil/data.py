@@ -105,6 +105,14 @@ def _to_clipped_bag(
 
 # -----------------------------------------------------------------------------
 
+def _is_multi_bag_entry(entry: Any) -> bool:
+    if isinstance(entry, (list, tuple)):
+        return True
+    if isinstance(entry, np.ndarray) and (entry.dtype == object or entry.dtype.kind in ('U', 'S')):
+        return True
+    return False
+
+
 @dataclass
 class BagDataset(Dataset):
 
@@ -122,7 +130,7 @@ class BagDataset(Dataset):
         super().__init__()
         if bag_size and max_bag_size:
             raise ValueError("Cannot specify both bag_size and max_bag_size")
-        if balanced and not all(isinstance(element, (list, tuple)) for element in bags):
+        if balanced and not all(_is_multi_bag_entry(element) for element in bags):
             raise TypeError("Every element in bags must be a list or tuple to activate balanced mode.")
         self.bags = bags
         self.bag_size = bag_size
@@ -146,23 +154,24 @@ class BagDataset(Dataset):
         return len(self.bags)
 
     def _load(self, index: int):
-        if isinstance(self.bags[index], (str, Path)):
-            feats = utils._load_bag(self.bags[index], dtype=self.dtype)
-        elif isinstance(self.bags[index], np.ndarray):
-            feats = torch.from_numpy(self.bags[index]).to(self.dtype)
-        elif isinstance(self.bags[index], torch.Tensor):
-            feats = self.bags[index].to(self.dtype)
+        entry = self.bags[index]
+        if isinstance(entry, (str, Path)):
+            feats = utils._load_bag(entry, dtype=self.dtype)
+        elif isinstance(entry, np.ndarray) and not _is_multi_bag_entry(entry):
+            feats = torch.from_numpy(entry).to(self.dtype)
+        elif isinstance(entry, torch.Tensor):
+            feats = entry.to(self.dtype)
         elif self.balanced:
             feats = [
                 utils._load_bag(slide, dtype=self.dtype)
                 if isinstance(slide, (str, Path, np.ndarray, torch.Tensor))
                 else torch.as_tensor(slide, dtype=self.dtype)
-                for slide in self.bags[index]
+                for slide in entry
             ]
         else:
             feats = torch.cat([
                 utils._load_bag(slide, dtype=self.dtype)
-                for slide in self.bags[index]
+                for slide in entry
             ])
         return feats
 

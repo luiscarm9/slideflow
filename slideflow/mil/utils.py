@@ -177,8 +177,11 @@ def aggregate_bags_by_patient(
             patient_to_bags[patient] = []
         patient_to_bags[patient].append(bag)
 
-    # Create array where each element contains the list of slides for a patient.
-    bags = np.array([lst for lst in patient_to_bags.values()], dtype=object)
+    # Create 1D object array where each element is the list of slides for a patient
+    # (np.array(..., dtype=object) collapses equal-length sublists into a 2D array).
+    patient_bag_lists = list(patient_to_bags.values())
+    bags = np.empty(len(patient_bag_lists), dtype=object)
+    bags[:] = patient_bag_lists
 
     # Create a dictionary mapping patients to their labels.
     patients_labels = {}
@@ -275,8 +278,11 @@ def aggregate_trainval_bags_by_patient(
             patient_to_bags[patient] = []
         patient_to_bags[patient].append(bag)
 
-    # Create array where each element contains the list of slides for a patient.
-    bags = np.array([lst for lst in patient_to_bags.values()], dtype=object)
+    # Create 1D object array where each element is the list of slides for a patient
+    # (np.array(..., dtype=object) collapses equal-length sublists into a 2D array).
+    patient_bag_lists = list(patient_to_bags.values())
+    bags = np.empty(len(patient_bag_lists), dtype=object)
+    bags[:] = patient_bag_lists
 
     # Create a dictionary mapping patients to their labels.
     patients_labels = {}
@@ -490,21 +496,26 @@ def _find_weights_path(path: str, mil_params: Dict) -> str:
 
 
 def _load_bag(
-    bag: Union[str, np.ndarray, "torch.Tensor", List[str]],
-    device='cpu'
+    bag: Union[str, os.PathLike, np.ndarray, "torch.Tensor", List[str]],
+    device='cpu',
+    dtype: Optional["torch.dtype"] = None,
 ) -> "torch.Tensor":
     """Load bag from file or convert to torch.Tensor."""
     import torch
 
+    target_dtype = torch.float32 if dtype is None else dtype
     if _is_list_of_paths(bag):
         # If bags are passed as a list of paths, load them individually.
-        return torch.cat([_load_bag(b, device=device) for b in bag], dim=0)
-    if isinstance(bag, str):
-        return torch.load(bag, map_location=device).to(torch.float32)
+        return torch.cat(
+            [_load_bag(b, device=device, dtype=target_dtype) for b in bag],
+            dim=0,
+        )
+    if isinstance(bag, (str, os.PathLike)):
+        return torch.load(str(bag), map_location=device).to(target_dtype)
     elif isinstance(bag, np.ndarray):
-        return torch.from_numpy(bag).to(torch.float32).to(device)
+        return torch.from_numpy(bag).to(target_dtype).to(device)
     elif isinstance(bag, torch.Tensor):
-        return bag.to(device)
+        return bag.to(dtype=target_dtype, device=device) if dtype is not None else bag.to(device)
     else:
         raise ValueError(
             "Unrecognized bag type '{}'".format(type(bag))
@@ -565,8 +576,11 @@ def _get_nested_bags(dataset, bag_directories):
 
 
 def _is_list_of_paths(bag):
-    return ((isinstance(bag, list) or (isinstance(bag, np.ndarray))
-             and isinstance(bag[0], str)))
+    return (
+        isinstance(bag, (list, tuple, np.ndarray))
+        and len(bag) > 0
+        and isinstance(bag[0], (str, os.PathLike))
+    )
 
 
 def _output_to_numpy(*args):
