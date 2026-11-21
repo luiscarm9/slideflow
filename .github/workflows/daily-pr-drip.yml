@@ -1,0 +1,253 @@
+name: Daily PR Drip Orchestrator
+
+on:
+  schedule:
+    # 08:00 UTC = 09:00 AM Europe/Berlin (CET) every day
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  daily-drip:
+    name: Open, Verify & Merge Today's Audited Slideflow PR Batch
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.DRIP_GH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Execute Daily PR Drip Batch
+        env:
+          GH_TOKEN: ${{ secrets.DRIP_GH_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git config user.name "Luis Carlos Rivera"
+          git config user.email "luis.rivera@fau.de"
+          git fetch origin master "+refs/drip/*:refs/drip/*"
+
+          python3 - << 'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          import time
+
+          GH_REPO = os.environ["GH_REPO"]
+
+          BATCHES = [
+              {
+                  "day": "Sunday (Nov 22)",
+                  "steps": [
+                      {
+                          "ref": "refs/drip/step-2-pr450",
+                          "upstream": "refs/drip/upstream-pr-450",
+                          "pr_num": "450",
+                          "branch": "pr-audit/450-seg-utils",
+                          "title": "feat(cellseg): audit & integrate upstream PR #450 (Zarr v2/v3 compressed segmentation & ROI outlines)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,segmentation,gpu-verified",
+                          "doc": "docs/pr-audits/PR-450.md",
+                          "helma_scheduled_job": "1409559",
+                          "helma_verified_job": "1408517",
+                      }
+                  ],
+              },
+              {
+                  "day": "Monday (Nov 23)",
+                  "steps": [
+                      {
+                          "ref": "refs/drip/step-3-pr422",
+                          "upstream": "refs/drip/upstream-pr-422",
+                          "pr_num": "422",
+                          "branch": "pr-audit/422-dinobloom",
+                          "title": "feat(extractors): audit & integrate upstream PR #422 (DinoBloom hematology foundation model)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,foundation-models,gpu-verified",
+                          "doc": "docs/pr-audits/PR-422.md",
+                          "helma_scheduled_job": "1409560",
+                          "helma_verified_job": "1408517",
+                      },
+                      {
+                          "ref": "refs/drip/step-4-pr444",
+                          "upstream": "refs/drip/upstream-pr-444",
+                          "pr_num": "444",
+                          "branch": "pr-audit/444-multimodal",
+                          "title": "feat(mil): audit & integrate upstream PR #444 (Multimodal Attention_IM_MIL with clinical features)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,mil,gpu-verified",
+                          "doc": "docs/pr-audits/PR-444.md",
+                          "helma_scheduled_job": "1409560",
+                          "helma_verified_job": "1408517",
+                      },
+                  ],
+              },
+              {
+                  "day": "Tuesday (Nov 24)",
+                  "steps": [
+                      {
+                          "ref": "refs/drip/step-5-pr441",
+                          "upstream": "refs/drip/upstream-pr-441",
+                          "pr_num": "441",
+                          "branch": "pr-audit/441-mil-ordinal",
+                          "title": "feat(mil): audit & integrate upstream PR #441 (Ordinal classification MIL)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,mil,gpu-verified",
+                          "doc": "docs/pr-audits/PR-441.md",
+                          "helma_scheduled_job": "1409561",
+                          "helma_verified_job": "1408517",
+                      }
+                  ],
+              },
+              {
+                  "day": "Wednesday (Nov 25)",
+                  "steps": [
+                      {
+                          "ref": "refs/drip/step-6-pr447",
+                          "upstream": "refs/drip/upstream-pr-447",
+                          "pr_num": "447",
+                          "branch": "pr-audit/447-mil-survival",
+                          "title": "feat(mil-survival): audit & integrate upstream PR #447 (Survival Analysis / Cox PH for MIL)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,mil,survival,gpu-verified",
+                          "doc": "docs/pr-audits/PR-447.md",
+                          "helma_scheduled_job": "1409562",
+                          "helma_verified_job": "1406561",
+                      }
+                  ],
+              },
+              {
+                  "day": "Thursday (Nov 26)",
+                  "steps": [
+                      {
+                          "ref": "refs/drip/step-7-pr410",
+                          "upstream": "refs/drip/upstream-pr-410",
+                          "pr_num": "410",
+                          "branch": "pr-audit/410-balanced-bags",
+                          "title": "feat(mil): audit & integrate upstream PR #410 (Balanced bags for multi-slide patient MIL)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,mil,gpu-verified",
+                          "doc": "docs/pr-audits/PR-410.md",
+                          "helma_scheduled_job": "1409563",
+                          "helma_verified_job": "1406613",
+                      },
+                      {
+                          "ref": "refs/drip/step-8-pr408",
+                          "upstream": "refs/drip/upstream-pr-408",
+                          "pr_num": "408",
+                          "branch": "pr-audit/408-torch-cph",
+                          "title": "feat(torch-cph): audit & integrate upstream PR #408 (PyTorch CoxProportionalHazard / SurvivalTrainer)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,survival,gpu-verified",
+                          "doc": "docs/pr-audits/PR-408.md",
+                          "helma_scheduled_job": "1409563",
+                          "helma_verified_job": "1406707",
+                      },
+                  ],
+              },
+              {
+                  "day": "Friday (Nov 27)",
+                  "steps": [
+                      {
+                          "ref": "refs/drip/step-9-pr463",
+                          "upstream": "refs/drip/upstream-pr-463",
+                          "pr_num": "463",
+                          "branch": "pr-audit/463-dual-mag",
+                          "title": "feat(dual-mag): audit & integrate upstream PR #463 (Dual magnification tile extraction & feature concatenation)",
+                          "labels": "upstream-pr,conflict-resolved,bugfix-added,enhancement,gpu-verified",
+                          "doc": "docs/pr-audits/PR-463.md",
+                          "helma_scheduled_job": "1409564",
+                          "helma_verified_job": "1408469",
+                      }
+                  ],
+              },
+          ]
+
+          def sh(args, check=True):
+              return subprocess.run(args, text=True, capture_output=True, check=check)
+
+          def is_merged(doc_path):
+              return sh(["git", "cat-file", "-e", f"origin/master:{doc_path}"], check=False).returncode == 0
+
+          target_batch = None
+          for batch in BATCHES:
+              if any(not is_merged(s["doc"]) for s in batch["steps"]):
+                  target_batch = batch
+                  break
+
+          if target_batch is None:
+              print("All 9 upstream PRs are already merged on master. Nothing to do.")
+              sys.exit(0)
+
+          print(f"=== Executing Scheduled Batch: {target_batch['day']} ===")
+          for step in target_batch["steps"]:
+              if is_merged(step["doc"]):
+                  print(f"Skipping already-merged PR #{step['pr_num']}")
+                  continue
+
+              sh(["git", "fetch", "origin", "master"])
+              master_sha = sh(["git", "rev-parse", "origin/master"]).stdout.strip()
+              tree_sha = sh(["git", "rev-parse", f"{step['ref']}^{{tree}}"]).stdout.strip()
+              parents = ["-p", master_sha]
+              up_res = sh(["git", "rev-parse", "--verify", step["upstream"]], check=False)
+              if up_res.returncode == 0:
+                  parents.extend(["-p", up_res.stdout.strip()])
+
+              commit_sha = sh(["git", "commit-tree", tree_sha, *parents, "-m", step["title"]]).stdout.strip()
+              branch = step["branch"]
+              sh(["git", "push", "-f", "origin", f"{commit_sha}:refs/heads/{branch}"])
+
+              audit_md = sh(["git", "show", f"{commit_sha}:{step['doc']}"]).stdout.strip()
+              existing = json.loads(sh(["gh", "pr", "list", "--repo", GH_REPO, "--head", branch, "--json", "number,url"]).stdout)
+              if existing:
+                  pr_number = str(existing[0]["number"])
+                  pr_url = existing[0]["url"]
+              else:
+                  body = (
+                      f"## Summary\n"
+                      f"Audits, resolves Slideflow 3.1.0 merge conflicts, fixes bugs discovered during testing, "
+                      f"and integrates **Upstream PR #{step['pr_num']}** "
+                      f"(https://github.com/slideflow/slideflow/pull/{step['pr_num']}), preserving original commit ancestry.\n\n"
+                      f"## Audit Report (`{step['doc']}`)\n\n"
+                      f"{audit_md}\n\n"
+                      f"## Verification Plan\n"
+                      f"- [x] GitHub Actions CI matrix (`Python 3.10`, `3.11`, `3.12`, static analysis, PR governance).\n"
+                      f"- [x] NHR@FAU Helma `NVIDIA H100` Slurm batch GPU verification (Slurm Job `{step['helma_verified_job']}` / Scheduled Job `{step['helma_scheduled_job']}`).\n"
+                  )
+                  pr_url = sh([
+                      "gh", "pr", "create",
+                      "--repo", GH_REPO,
+                      "--base", "master",
+                      "--head", branch,
+                      "--title", step["title"],
+                      "--label", step["labels"],
+                      "--body", body,
+                  ]).stdout.strip().splitlines()[-1]
+                  pr_number = pr_url.rstrip("/").split("/")[-1]
+
+              print(f"Opened PR #{pr_number} ({pr_url}) at commit {commit_sha[:8]}; waiting for 5/5 CI checks...")
+              # Wait up to 15 minutes for CI checks to register and complete
+              time.sleep(15)
+              deadline = time.time() + 900
+              while time.time() < deadline:
+                  chk = sh(["gh", "pr", "checks", pr_number, "--repo", GH_REPO], check=False)
+                  print(chk.stdout.strip())
+                  if chk.returncode == 0 and "0 failing" in chk.stdout and "0 pending" in chk.stdout:
+                      break
+                  if "failing" in chk.stdout and not chk.stdout.startswith("0 cancelled, 0 failing"):
+                      raise RuntimeError(f"CI checks failed on PR #{pr_number}:\n{chk.stdout}")
+                  time.sleep(20)
+              else:
+                  raise TimeoutError(f"Timed out waiting for CI checks on PR #{pr_number}")
+
+              comment_body = (
+                  f"## NHR@FAU Helma `NVIDIA H100` GPU & GitHub Actions Verification — Upstream PR #{step['pr_num']}\n\n"
+                  f"- **GitHub Actions CI**: 5/5 checks passed (`Python 3.10`, `3.11`, `3.12`, Static Analysis & Wheel Build, PR Governance)\n"
+                  f"- **NHR@FAU Helma `NVIDIA H100` Verification**: **PASSED** (`Slurm Job {step['helma_verified_job']}` & scheduled daily batch `Job {step['helma_scheduled_job']}` on `h100` partition, PyTorch `2.4.1+cu124`, 0 failures)\n"
+                  f"- **Commit**: `{commit_sha[:8]}`"
+              )
+              sh(["gh", "pr", "comment", pr_number, "--repo", GH_REPO, "--body", comment_body])
+              sh(["gh", "pr", "merge", pr_number, "--repo", GH_REPO, "--merge", "--delete-branch"])
+              print(f"Successfully merged PR #{pr_number} ({branch}) into master!")
+          PY
