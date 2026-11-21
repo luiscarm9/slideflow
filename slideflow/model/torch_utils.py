@@ -38,7 +38,7 @@ def get_module_by_name(module: Union[torch.Tensor, torch.nn.Module],
 @contextlib.contextmanager
 def autocast(device_type: Optional[str] = None, mixed_precision: bool = True):
     """Autocast with mixed precision."""
-    if not mixed_precision or device_type == 'mps':
+    if not mixed_precision or device_type in ('mps', 'cpu'):
         with no_scope():
             yield
     elif version.parse(torch.__version__) >= version.parse("1.12"):
@@ -263,7 +263,10 @@ def eval_from_model(
     corrects, acc, loss = None, None, None
     model.eval()
     device = get_device(device)
-    _mp = (device.type in ('cuda', 'cpu'))
+    if torch_args is not None and hasattr(torch_args, 'mixed_precision'):
+        _mp = bool(torch_args.mixed_precision) and (device.type == 'cuda')
+    else:
+        _mp = (device.type == 'cuda')
 
     if verbosity != 'silent':
         pb = Progress(SpinnerColumn(), transient=True)

@@ -948,6 +948,7 @@ class Trainer:
             num_slide_features=self.num_slide_features,
             slide_input=self.slide_input,
             normalizer=(self.normalizer if self._has_gpu_normalizer() else None),
+            mixed_precision=self.mixed_precision,
         )
         # Calculate patient/slide/tile metrics (AUC, R-squared, C-index, etc)
         metrics, acc, loss = sf.stats.metrics_from_dataset(
@@ -1691,6 +1692,7 @@ class Trainer:
             num_slide_features=self.num_slide_features,
             slide_input=self.slide_input,
             normalizer=(self.normalizer if self._has_gpu_normalizer() else None),
+            mixed_precision=self.mixed_precision,
         )
         dfs = sf.stats.predict_dataset(
             model=self.model,

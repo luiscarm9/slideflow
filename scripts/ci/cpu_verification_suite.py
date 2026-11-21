@@ -566,6 +566,7 @@ def test_pr408_torch_cph_tile_survival_trainer(tmp_path):
 
     preds = P.predict(saved_zip, dataset=val_dts, batch_size=4, mixed_precision=False)
     assert "slide" in preds and "time-y_pred" in preds["slide"].columns
+    assert not np.isnan(preds["slide"]["time-y_pred"].to_numpy()).any()
 
     # 2. Multi-input survival training (event + clinical covariate)
     res_multi = P.train(
@@ -581,3 +582,60 @@ def test_pr408_torch_cph_tile_survival_trainer(tmp_path):
         mixed_precision=False,
     )
     assert len(res_multi) == 1
+
+
+def test_pr463_dual_magnification_extraction_and_features(tmp_path):
+    """Verify PR #463 extract_lower_mag_tiles_from_tfr, LowerMagSlideReport, and DualMagnificationFeatures."""
+    slides_dir = tmp_path / "dual_slides"
+    slides_dir.mkdir()
+    anns_path = str(tmp_path / "dual_anns.csv")
+
+    with open(anns_path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["patient", "slide", "category"])
+        for idx in range(2):
+            sname = f"dual_slide_{idx}"
+            # 1024x1024 at 0.25 mpp -> 256um x 256um -> 4x4=16 tiles at 64um, combined (mag_ratio=2) -> 2x2=4 tiles at 128um
+            _make_synthetic_histology_tiff(str(slides_dir / f"{sname}.tiff"), width=1024, height=1024, seed=600 + idx)
+            writer.writerow([f"pt_{idx}", sname, "pos" if idx == 0 else "neg"])
+
+    P = sf.create_project(root=str(tmp_path / "dual_proj"), slides=str(slides_dir), annotations=anns_path)
+    P.extract_tiles(tile_px=128, tile_um=64, qc=None, roi_method="ignore", num_threads=2)
+
+    high_dts = P.dataset(tile_px=128, tile_um=64)
+    assert len(high_dts.tfrecords()) == 2
+    assert high_dts.num_tiles == 32  # 16 tiles per slide
+
+    reports = P.extract_lower_mag_tiles_from_tfr(
+        tile_px=128,
+        tile_um=64,
+        mag_ratio=2,
+        target_tile_px=128,
+        report=True,
+    )
+    assert len(reports) == 2
+    for rep in reports.values():
+        assert rep.combination_efficiency == 100.0
+        assert rep.spatial_coverage_reduction == 75.0
+
+    low_dts = P.dataset(tile_px=128, tile_um=128, source_um=64)
+    assert len(low_dts.tfrecords()) == 2
+    assert low_dts.num_tiles == 8  # 4 combined tiles per slide
+
+    # Verify DualMagnificationFeatures spatial matching & feature concatenation (512 + 512 = 1024 dims)
+    dual_out = str(tmp_path / "dual_features_out")
+    dual_feats = P.extract_dual_magnification_features(
+        model_path="resnet18_imagenet",
+        output_dir=dual_out,
+        device="cpu",
+        high_mag_um=64,
+        low_mag_um=128,
+        tile_px=128,
+        batch_size=4,
+        num_workers=0,
+    )
+    assert dual_feats.num_features == 1024
+    for idx in range(2):
+        pt_bag = torch.load(join(dual_feats.concatenated_dir, f"dual_slide_{idx}.pt"))
+        assert pt_bag.shape == (16, 1024)
+        assert torch.isfinite(pt_bag).all().item()
