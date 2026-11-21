@@ -173,7 +173,8 @@ setuptools.setup(
             'fastai',
             'pytorch-lightning',
             'timm',
-            'segmentation-models-pytorch'
+            'segmentation-models-pytorch',
+            'nystrom-attention',
         ],
         'smac': [
             'smac>=1.4.0',
