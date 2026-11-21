@@ -357,3 +357,21 @@ def _preprocess_scoring_data(event_times, predicted_scores, event_observed):
             raise ValueError("NaNs detected in inputs, please correct or drop.")
 
     return event_times, predicted_scores, event_observed
+
+def c_index(y_true, y_pred):
+    """Wrapper for concordance index calculation in MIL Cox survival models."""
+    if hasattr(y_true, 'detach'):
+        y_true = y_true.detach().cpu().numpy()
+    if hasattr(y_pred, 'detach'):
+        y_pred = y_pred.detach().cpu().numpy()
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float).ravel()
+
+    durations = y_true[:, 0]
+    events = y_true[:, 1]
+
+    # Higher log-hazard = higher risk = shorter survival; negate for Harrell c-index
+    try:
+        return concordance_index(durations, -y_pred, events)
+    except ZeroDivisionError:
+        return float('nan')

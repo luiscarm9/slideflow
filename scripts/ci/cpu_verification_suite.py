@@ -361,3 +361,53 @@ def test_pr441_mil_ordinal_training_and_eval(tmp_path):
     assert len(run_dirs) == 1
     eval_df = sf.mil.eval_mil(run_dirs[0], val_dts, outcomes="grade", bags=str(bags_dir), outdir=str(tmp_path / "ord_eval"))
     assert len(eval_df) == 4
+
+
+def test_pr447_mil_survival_training_and_eval(tmp_path):
+    """Verify PR #447 MIL Cox Proportional Hazards survival training, concordance index, and eval_mil."""
+    import slideflow.mil
+
+    slides_dir = tmp_path / "surv_slides"
+    slides_dir.mkdir()
+    bags_dir = tmp_path / "surv_bags"
+    bags_dir.mkdir()
+    anns_path = str(tmp_path / "surv_anns.csv")
+
+    with open(anns_path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["patient", "slide", "split", "time", "event"])
+        for idx in range(8):
+            sname = f"surv_slide_{idx}"
+            _make_synthetic_histology_tiff(str(slides_dir / f"{sname}.tiff"), width=512, height=512, seed=300 + idx)
+            bag = torch.randn((12, 32)) + float(idx) * 0.25
+            torch.save(bag, str(bags_dir / f"{sname}.pt"))
+            writer.writerow([f"pt_{idx}", sname, "TRAIN" if idx < 4 else "VAL", 10 + idx * 8, 1 if idx % 2 == 0 else 0])
+
+    P = sf.create_project(root=str(tmp_path / "surv_proj"), slides=str(slides_dir), annotations=anns_path)
+    dts = P.dataset(tile_px=128, tile_um=128)
+    train_dts = dts.filter({"split": ["TRAIN"]})
+    val_dts = dts.filter({"split": ["VAL"]})
+
+    mil_out = str(tmp_path / "surv_mil_out")
+    cfg = sf.mil.mil_config("attention_mil", loss="CPH", epochs=2, batch_size=2, lr=1e-3, drop_last=False)
+    sf.mil.train_mil(
+        cfg,
+        train_dataset=train_dts,
+        val_dataset=val_dts,
+        outcomes="time",
+        events="event",
+        bags=str(bags_dir),
+        outdir=mil_out,
+        device="cpu",
+    )
+    run_dirs = [join(mil_out, d) for d in os.listdir(mil_out) if os.path.isdir(join(mil_out, d))]
+    assert len(run_dirs) == 1
+    eval_df = sf.mil.eval_mil(
+        run_dirs[0],
+        val_dts,
+        outcomes="time",
+        events="event",
+        bags=str(bags_dir),
+        outdir=str(tmp_path / "surv_eval"),
+    )
+    assert len(eval_df) == 4
