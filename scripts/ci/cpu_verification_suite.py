@@ -334,12 +334,12 @@ def test_pr441_mil_ordinal_training_and_eval(tmp_path):
     with open(anns_path, "w", newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(["patient", "slide", "split", "grade"])
-        for idx in range(6):
+        for idx in range(8):
             sname = f"ord_slide_{idx}"
             _make_synthetic_histology_tiff(str(slides_dir / f"{sname}.tiff"), width=512, height=512, seed=200 + idx)
             bag = torch.randn((12, 32)) + float(idx % 3)
             torch.save(bag, str(bags_dir / f"{sname}.pt"))
-            writer.writerow([f"pt_{idx}", sname, "TRAIN" if idx < 3 else "VAL", f"G{idx % 3}"])
+            writer.writerow([f"pt_{idx}", sname, "TRAIN" if idx < 4 else "VAL", f"G{idx % 3}"])
 
     P = sf.create_project(root=str(tmp_path / "ord_proj"), slides=str(slides_dir), annotations=anns_path)
     dts = P.dataset(tile_px=128, tile_um=128)
@@ -360,4 +360,4 @@ def test_pr441_mil_ordinal_training_and_eval(tmp_path):
     run_dirs = [join(mil_out, d) for d in os.listdir(mil_out) if os.path.isdir(join(mil_out, d))]
     assert len(run_dirs) == 1
     eval_df = sf.mil.eval_mil(run_dirs[0], val_dts, outcomes="grade", bags=str(bags_dir), outdir=str(tmp_path / "ord_eval"))
-    assert len(eval_df) == 3
+    assert len(eval_df) == 4
