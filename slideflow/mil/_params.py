@@ -167,12 +167,28 @@ class TrainerConfig:
             correlation coefficient for regression models.
 
         """
-        from fastai.vision.all import RocAuc, mse, PearsonCorrCoef
+        from fastai.vision.all import AccumMetric, RocAuc, mse, PearsonCorrCoef
 
         model_metrics = self.model_config.get_metrics()
 
-        if self.is_classification():
+        if self.model_config.model_type == 'classification':
             fallback = [RocAuc()]
+        elif self.model_config.model_type == 'ordinal':
+            def _ordinal_roc_auc(inp, targ):
+                from sklearn.metrics import roc_auc_score
+                probs = torch.sigmoid(inp).detach().cpu().numpy()
+                y_true = targ.detach().cpu().numpy()
+                if probs.ndim == 1:
+                    probs = probs[:, None]
+                    y_true = y_true[:, None]
+                aucs = [
+                    roc_auc_score(y_true[:, j], probs[:, j])
+                    for j in range(y_true.shape[1])
+                    if len(np.unique(y_true[:, j])) > 1
+                ]
+                return float(np.mean(aucs)) if aucs else float('nan')
+
+            fallback = [AccumMetric(_ordinal_roc_auc, flatten=False)]
         else:
             fallback = [mse, PearsonCorrCoef()]
         return model_metrics or fallback
@@ -601,7 +617,8 @@ class MILModelConfig:
         'cross_entropy': nn.CrossEntropyLoss,
         'mse': nn.MSELoss,
         'mae': nn.L1Loss,
-        'huber': nn.SmoothL1Loss
+        'huber': nn.SmoothL1Loss,
+        'BCE_ordinal': nn.BCEWithLogitsLoss,
     }
 
     def __init__(
@@ -692,6 +709,8 @@ class MILModelConfig:
         """Type of model (classification or regression)."""
         if self.loss == 'cross_entropy':
             return 'classification'
+        elif self.loss == 'BCE_ordinal':
+            return 'ordinal'
         else:
             return 'regression'
 
@@ -899,7 +918,7 @@ class MILModelConfig:
             outdir (str): Output directory for saving metrics.
 
         """
-        if self.is_classification():
+        if self.model_type in ['classification', 'ordinal']:
             sf.stats.metrics.classification_metrics(df, level=level, data_dir=outdir)
         else:
             sf.stats.metrics.regression_metrics(df, level=level, data_dir=outdir)
