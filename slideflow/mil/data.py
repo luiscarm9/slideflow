@@ -13,7 +13,7 @@ from . import utils
 
 # -----------------------------------------------------------------------------
 
-def build_dataset(bags, targets, encoder, bag_size, use_lens=False,  max_bag_size=None, dtype=torch.float32):
+def build_dataset(bags, targets, encoder, bag_size, use_lens=False, max_bag_size=None, balanced=False, dtype=torch.float32):
     assert len(bags) == len(targets)
 
     def _zip(bag, targets):
@@ -26,7 +26,7 @@ def build_dataset(bags, targets, encoder, bag_size, use_lens=False,  max_bag_siz
 
     dataset = MapDataset(
         _zip,
-        BagDataset(bags, bag_size=bag_size, max_bag_size=max_bag_size, dtype=dtype),
+        BagDataset(bags, bag_size=bag_size, max_bag_size=max_bag_size, balanced=balanced, dtype=dtype),
         EncodedDataset(encoder, targets),
     )
     dataset.encoder = encoder
@@ -54,21 +54,44 @@ def build_multibag_dataset(bags, targets, encoder, bag_size, use_lens=False, max
 # -----------------------------------------------------------------------------
 
 def _to_fixed_size_bag(
-    bag: torch.Tensor,
+    bag: Union[torch.Tensor, List[torch.Tensor]],
     bag_size: int = 512,
+    balanced: bool = False,
 ) -> Tuple[torch.Tensor, int]:
-    # get up to bag_size elements
-    bag_idxs = torch.randperm(bag.shape[0])[:bag_size]
-    bag_samples = bag[bag_idxs]
+    if balanced:
+        if not isinstance(bag, (list, tuple)) or len(bag) == 0:
+            raise TypeError(f"Bag must be a non-empty list of Tensors in balanced mode; got {type(bag)}")
+        if any(not isinstance(tensor, torch.Tensor) for tensor in bag):
+            raise TypeError("All elements in bag must be torch.Tensor in balanced mode.")
+        non_empty = [t for t in bag if t.shape[0] > 0]
+        if not non_empty:
+            feat_dim = bag[0].shape[1]
+            return torch.zeros(bag_size, feat_dim, dtype=bag[0].dtype, device=bag[0].device), 0
+        per_slide = max(1, min(bag_size // len(non_empty), min(t.shape[0] for t in non_empty)))
+        bag_samples = torch.cat([
+            t[torch.randperm(t.shape[0], device=t.device)[:per_slide]]
+            for t in non_empty
+        ])[:bag_size]
+    else:
+        if isinstance(bag, (list, tuple)):
+            bag = torch.cat(list(bag))
+        elif not isinstance(bag, torch.Tensor):
+            raise TypeError(f"Bag must be list[torch.Tensor] or torch.Tensor; got {type(bag)}")
+        bag_idxs = torch.randperm(bag.shape[0], device=bag.device)[:bag_size]
+        bag_samples = bag[bag_idxs]
 
-    # zero-pad if we don't have enough samples
     zero_padded = torch.cat(
         (
             bag_samples,
-            torch.zeros(bag_size - bag_samples.shape[0], bag_samples.shape[1]),
+            torch.zeros(
+                bag_size - bag_samples.shape[0],
+                bag_samples.shape[1],
+                dtype=bag_samples.dtype,
+                device=bag_samples.device,
+            ),
         )
     )
-    return zero_padded, min(bag_size, len(bag))
+    return zero_padded, min(bag_size, len(bag_samples))
 
 def _to_clipped_bag(
     bag: torch.Tensor,
@@ -82,6 +105,14 @@ def _to_clipped_bag(
 
 # -----------------------------------------------------------------------------
 
+def _is_multi_bag_entry(entry: Any) -> bool:
+    if isinstance(entry, (list, tuple)):
+        return True
+    if isinstance(entry, np.ndarray) and (entry.dtype == object or entry.dtype.kind in ('U', 'S')):
+        return True
+    return False
+
+
 @dataclass
 class BagDataset(Dataset):
 
@@ -92,54 +123,55 @@ class BagDataset(Dataset):
         max_bag_size: Optional[int] = None,
         preload: bool = False,
         *,
+        balanced: bool = False,
         dtype: torch.dtype = torch.float32
     ):
-        """A dataset of bags of instances.
-
-        Args:
-
-            bags (list(str), list(np.ndarray), list(torch.Tensor), list(list(str))):  Bags for each slide.
-                This can either be a list of `.pt`  files, a list of numpy
-                arrays, a list of Tensors, or a list of lists of strings (where
-                each item in the list is a patient, and nested items are slides
-                for that patient). Each bag consists of features taken from all
-                images from a slide. Data should be of shape N x F, where N is
-                the number of instances and F is the number of features per
-                instance/slide.
-            bag_size (int):  The number of instances in each bag. For bags
-                containing more instances, a random sample of `bag_size`
-                instances will be drawn.  Smaller bags are padded with zeros.
-                If `bag_size` is None, all the samples will be used.
-
-        """
+        """A dataset of bags of instances."""
         super().__init__()
         if bag_size and max_bag_size:
             raise ValueError("Cannot specify both bag_size and max_bag_size")
+        if balanced and not all(_is_multi_bag_entry(element) for element in bags):
+            raise TypeError("Every element in bags must be a list or tuple to activate balanced mode.")
         self.bags = bags
         self.bag_size = bag_size
         self.max_bag_size = max_bag_size
         self.preload = preload
+        self.balanced = balanced
         self.dtype = dtype
 
         if self.preload:
-            self.bags = [
-                utils._load_bag(b, dtype=self.dtype) for b in self.bags
-            ]
+            if self.balanced:
+                self.bags = [
+                    [utils._load_bag(s, dtype=self.dtype) for s in b]
+                    for b in self.bags
+                ]
+            else:
+                self.bags = [
+                    utils._load_bag(b, dtype=self.dtype) for b in self.bags
+                ]
 
     def __len__(self):
         return len(self.bags)
 
     def _load(self, index: int):
-        if isinstance(self.bags[index], str):
-            feats = torch.load(self.bags[index]).to(self.dtype)
-        elif isinstance(self.bags[index], np.ndarray):
-            feats = torch.from_numpy(self.bags[index]).to(self.dtype)
-        elif isinstance(self.bags[index], torch.Tensor):
-            feats = self.bags[index].to(self.dtype)
+        entry = self.bags[index]
+        if isinstance(entry, (str, Path)):
+            feats = utils._load_bag(entry, dtype=self.dtype)
+        elif isinstance(entry, np.ndarray) and not _is_multi_bag_entry(entry):
+            feats = torch.from_numpy(entry).to(self.dtype)
+        elif isinstance(entry, torch.Tensor):
+            feats = entry.to(self.dtype)
+        elif self.balanced:
+            feats = [
+                utils._load_bag(slide, dtype=self.dtype)
+                if isinstance(slide, (str, Path, np.ndarray, torch.Tensor))
+                else torch.as_tensor(slide, dtype=self.dtype)
+                for slide in entry
+            ]
         else:
             feats = torch.cat([
-                torch.load(slide).to(self.dtype)
-                for slide in self.bags[index]
+                utils._load_bag(slide, dtype=self.dtype)
+                for slide in entry
             ])
         return feats
 
@@ -152,11 +184,11 @@ class BagDataset(Dataset):
 
         # sample a subset, if required
         if self.bag_size:
-            return _to_fixed_size_bag(feats, bag_size=self.bag_size)
-        elif self.max_bag_size:
+            return _to_fixed_size_bag(feats, bag_size=self.bag_size, balanced=self.balanced)
+        feats = torch.cat(list(feats)) if isinstance(feats, (list, tuple)) else feats
+        if self.max_bag_size:
             return _to_clipped_bag(feats, max_bag_size=self.max_bag_size)
-        else:
-            return feats, len(feats)
+        return feats, len(feats)
 
 # -----------------------------------------------------------------------------
 

@@ -54,6 +54,7 @@ class TrainerConfig:
         lr: Optional[float] = None,
         wd: float = 1e-5,
         bag_size: int = 512,
+        balanced: bool = False,
         max_val_bag_size: Optional[int] = None,
         fit_one_cycle: bool = True,
         epochs: int = 32,
@@ -100,6 +101,7 @@ class TrainerConfig:
         self.lr = lr
         self.wd = wd
         self.bag_size = bag_size
+        self.balanced = balanced
         self.max_val_bag_size = max_val_bag_size
         self.fit_one_cycle = fit_one_cycle
         self.epochs = epochs
@@ -533,6 +535,8 @@ class TrainerConfig:
         # Dataset kwargs
         if 'bag_size' not in dataset_kwargs:
             dataset_kwargs['bag_size'] = self.bag_size
+        if 'balanced' not in dataset_kwargs and not self.is_multimodal:
+            dataset_kwargs['balanced'] = self.balanced
 
         # Dataloader kwargs
         if 'drop_last' not in dataloader_kwargs:
