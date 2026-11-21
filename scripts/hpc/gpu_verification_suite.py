@@ -177,7 +177,9 @@ def test_gpu_bag_generation_and_mil_architectures(gpu_project_env):
     val_dts = dataset.filter({"split": ["VAL"]})
 
     import importlib.util
-    archs = ["attention_mil", "bistro.transformer"]
+    archs = ["attention_mil"]
+    if importlib.util.find_spec("einops") is not None:
+        archs.append("bistro.transformer")
     if importlib.util.find_spec("nystrom_attention") is not None:
         archs.append("transmil")
 

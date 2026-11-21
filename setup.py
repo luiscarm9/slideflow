@@ -174,6 +174,7 @@ setuptools.setup(
             'pytorch-lightning',
             'timm',
             'segmentation-models-pytorch',
+            'einops',
             'nystrom-attention',
         ],
         'smac': [
