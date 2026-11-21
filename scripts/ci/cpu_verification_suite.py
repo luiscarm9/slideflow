@@ -468,3 +468,118 @@ def test_pr410_balanced_bags_patient_mil(tmp_path):
         outdir=str(tmp_path / "bal_mil_out"),
         device="cpu",
     )
+
+
+def test_pr408_torch_cph_tile_survival_trainer(tmp_path):
+    """Verify PR #408 PyTorch CoxProportionalHazardsLoss, SurvivalTrainer, C-index sign, evaluate, and predict."""
+    from slideflow.model.torch_utils import CoxProportionalHazardsLoss
+
+    loss_fn = CoxProportionalHazardsLoss()
+
+    # Short survival (T=5, E=1) with higher log-hazard (+2.0) vs long survival (T=50, E=1) with lower log-hazard (-2.0)
+    y_true = torch.tensor([[5.0, 1.0], [50.0, 1.0]], dtype=torch.float32)
+    good_log_h = torch.tensor([[2.0], [-2.0]], dtype=torch.float32, requires_grad=True)
+    bad_log_h = torch.tensor([[-2.0], [2.0]], dtype=torch.float32, requires_grad=True)
+    assert loss_fn(good_log_h, y_true).item() < loss_fn(bad_log_h, y_true).item()
+
+    # Zero-event censored batch must preserve autograd graph
+    zero_event_y = torch.tensor([[10.0, 0.0], [20.0, 0.0]], dtype=torch.float32)
+    pred_zero = torch.tensor([[0.5], [-0.5]], dtype=torch.float32, requires_grad=True)
+    zero_loss = loss_fn(pred_zero, zero_event_y)
+    assert zero_loss.item() == 0.0 and zero_loss.requires_grad
+    zero_loss.backward()
+
+    # End-to-end tile-level PyTorch SurvivalTrainer (image-only + multi-input + evaluate + predict + load)
+    slides_dir = tmp_path / "cph_slides"
+    slides_dir.mkdir()
+    anns_path = str(tmp_path / "cph_anns.csv")
+
+    with open(anns_path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["patient", "slide", "split", "time", "event", "stage_covar"])
+        for idx in range(6):
+            sname = f"cph_slide_{idx}"
+            _make_synthetic_histology_tiff(str(slides_dir / f"{sname}.tiff"), width=512, height=512, seed=500 + idx)
+            writer.writerow([
+                f"pt_{idx}",
+                sname,
+                "TRAIN" if idx < 4 else "VAL",
+                10.0 + idx * 12.0,
+                1 if idx % 2 == 0 else 0,
+                "high" if idx < 3 else "low",
+            ])
+
+    P = sf.create_project(root=str(tmp_path / "cph_proj"), slides=str(slides_dir), annotations=anns_path)
+    P.extract_tiles(tile_px=128, tile_um=128, qc=None, roi_method="ignore", num_threads=2)
+
+    hp = sf.ModelParams(
+        tile_px=128,
+        tile_um=128,
+        epochs=1,
+        toplayer_epochs=0,
+        model="resnet18",
+        batch_size=4,
+        learning_rate=1e-4,
+        loss="CoxProportionalHazardsLoss",
+        augment=False,
+    )
+    assert hp.model_type() == "survival"
+    assert sf.ModelParams(tile_px=128, tile_um=128, model="resnet18", loss="NLL").model_type() == "survival"
+
+    train_dts = P.dataset(tile_px=128, tile_um=128).filter({"split": ["TRAIN"]})
+    val_dts = P.dataset(tile_px=128, tile_um=128).filter({"split": ["VAL"]})
+
+    # 1. Image-only survival training (event as first input_header)
+    res_single = P.train(
+        outcomes="time",
+        input_header="event",
+        params=hp,
+        dataset=train_dts,
+        val_dataset=val_dts,
+        exp_label="cph_single",
+        pretrain=None,
+        steps_per_epoch_override=2,
+        use_tensorboard=False,
+        mixed_precision=False,
+        num_workers=0,
+    )
+    assert len(res_single) == 1
+    cph_dirs = [join(P.models_dir, d) for d in os.listdir(P.models_dir) if "cph_single" in d]
+    assert len(cph_dirs) == 1
+    model_dir = cph_dirs[0]
+    saved_zip = [
+        join(model_dir, f) for f in os.listdir(model_dir) if f.endswith(".zip")
+    ][0]
+
+    # Verify sf.model.load, P.evaluate, and prospective P.predict (without input_header)
+    loaded_model = sf.model.load(saved_zip)
+    assert loaded_model is not None
+
+    eval_metrics = P.evaluate(
+        saved_zip,
+        outcomes="time",
+        input_header="event",
+        dataset=val_dts,
+        batch_size=4,
+        mixed_precision=False,
+    )
+    assert "eval" in eval_metrics and "slide_c_index" in eval_metrics["eval"]
+
+    preds = P.predict(saved_zip, dataset=val_dts, batch_size=4, mixed_precision=False)
+    assert "slide" in preds and "time-y_pred" in preds["slide"].columns
+
+    # 2. Multi-input survival training (event + clinical covariate)
+    res_multi = P.train(
+        outcomes="time",
+        input_header=["event", "stage_covar"],
+        params=hp,
+        dataset=train_dts,
+        val_dataset=val_dts,
+        exp_label="cph_multi",
+        pretrain=None,
+        steps_per_epoch_override=2,
+        use_tensorboard=False,
+        mixed_precision=False,
+        num_workers=0,
+    )
+    assert len(res_multi) == 1
