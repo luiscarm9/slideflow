@@ -85,8 +85,8 @@ def gpu_project_env(tmp_path_factory):
     proj_dir = str(root / "project")
     P = sf.create_project(root=proj_dir, slides=str(slides_dir), annotations=anns_path)
     dataset = P.dataset(tile_px=128, tile_um=128)
-    dataset.extract_tiles(qc="otsu", whitespace_fraction=0.9, num_threads=4, enable_downsample=False)
-    return {"root": str(root), "project": P, "dataset": dataset, "slides_dir": str(slides_dir)}
+    dataset.extract_tiles(whitespace_fraction=1.0, grayspace_fraction=1.0, num_threads=4, enable_downsample=False)
+    return {"root": str(root), "project": P, "dataset": P.dataset(tile_px=128, tile_um=128), "slides_dir": str(slides_dir)}
 
 
 def test_cuda_and_cucim_hardware_environment():
@@ -171,12 +171,19 @@ def test_gpu_bag_generation_and_mil_architectures(gpu_project_env):
     bags_dir = join(gpu_project_env["root"], "bags_resnet18")
 
     extractor = sf.build_feature_extractor("resnet18_imagenet", tile_px=128, device="cuda")
-    P.generate_feature_bags(extractor, dataset, outdir=bags_dir, min_tiles=1)
+    dataset.generate_feature_bags(extractor, outdir=bags_dir)
 
     train_dts = dataset.filter({"split": ["TRAIN"]})
     val_dts = dataset.filter({"split": ["VAL"]})
 
-    for arch in ("attention_mil", "transmil"):
+    import importlib.util
+    archs = ["attention_mil"]
+    if importlib.util.find_spec("einops") is not None:
+        archs.append("bistro.transformer")
+    if importlib.util.find_spec("nystrom_attention") is not None:
+        archs.append("transmil")
+
+    for arch in archs:
         mil_out = join(gpu_project_env["root"], f"mil_{arch}")
         cfg = sf.mil.mil_config(arch, epochs=2, batch_size=2, lr=1e-3, drop_last=False)
         sf.mil.train_mil(
