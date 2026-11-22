@@ -4,29 +4,30 @@
 #SBATCH --gres=gpu:h100:1
 #SBATCH --time=00:30:00
 #SBATCH --export=NONE
-#SBATCH --output=/hnvme/workspace/iwi5150h-slideflow_ci/logs/sf-gpu-%j.out
-#SBATCH --error=/hnvme/workspace/iwi5150h-slideflow_ci/logs/sf-gpu-%j.err
+#SBATCH --output=/home/hpc/iwi5/iwi5150h/.cache/slideflow_ci/logs/sf-gpu-%j.out
+#SBATCH --error=/home/hpc/iwi5/iwi5150h/.cache/slideflow_ci/logs/sf-gpu-%j.err
 
 unset SLURM_EXPORT_ENV
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
 # NHR@FAU Helma H100 GPU Verification Batch Job
-# Compliant with Helma usage regulations:
-#   - Uses 1x H100 in default `preempt` partition (<2h guaranteed window)
-#   - Executes inside single-file Apptainer .sif on /hnvme (zero inode bloat)
-#   - Stages repository checkout & synthetic WSI scratch data in node-local NVMe $TMPDIR
-#   - Uses NHR@FAU outbound proxy for any HuggingFace / model hub requests
+# Compliant with Helma usage regulations & /hnvme inode conservation:
+#   - Uses 1x H100 in `h100` partition
+#   - Executes inside single-file Apptainer .sif on /hnvme (zero new /hnvme inodes)
+#   - Clones & stages scratch data in node-local NVMe $TMPDIR
+#   - Writes compact 2-file report to $HOME/.cache/slideflow_ci/reports
 # -----------------------------------------------------------------------------
 
 WORKSPACE_DIR="${WORKSPACE_DIR:-/hnvme/workspace/iwi5150h-slideflow_ci}"
 SIF_IMAGE="${SIF_IMAGE:-${WORKSPACE_DIR}/containers/slideflow-deps.sif}"
-REPO_SRC="${REPO_SRC:-${WORKSPACE_DIR}/repo}"
-TARGET_REF="${TARGET_REF:-HEAD}"
+REPO_URL="${REPO_URL:-https://github.com/luiscarm9/slideflow.git}"
+TARGET_REF="${TARGET_REF:-master}"
 REPORT_TAG="${REPORT_TAG:-manual}"
-REPORT_DIR="${WORKSPACE_DIR}/reports/${REPORT_TAG}-job${SLURM_JOB_ID}"
+CACHE_BASE="${HOME}/.cache/slideflow_ci"
+REPORT_DIR="${CACHE_BASE}/reports/${REPORT_TAG}-job${SLURM_JOB_ID}"
 
-mkdir -p "${REPORT_DIR}" "${WORKSPACE_DIR}/hf_cache"
+mkdir -p "${REPORT_DIR}" "${CACHE_BASE}/logs" "${TMPDIR}/hf_cache" "${TMPDIR}/torch_cache"
 
 export http_proxy="http://proxy.nhr.fau.de:80"
 export https_proxy="http://proxy.nhr.fau.de:80"
@@ -37,17 +38,16 @@ export NO_PROXY="localhost,127.0.0.1"
 echo "=== Slideflow Helma GPU Verification ==="
 echo "Job ID      : ${SLURM_JOB_ID}"
 echo "Node        : $(hostname)"
-echo "Partition   : ${SLURM_JOB_PARTITION:-preempt}"
+echo "Partition   : ${SLURM_JOB_PARTITION:-h100}"
 echo "Target Ref  : ${TARGET_REF}"
 echo "Container   : ${SIF_IMAGE}"
 echo "Scratch Dir : ${TMPDIR}"
 
-# Stage repository cleanly into node-local NVMe SSD ($TMPDIR) without git-lfs host filter dependency
 STAGE_REPO="${TMPDIR}/slideflow-src"
 export GIT_LFS_SKIP_SMUDGE=1
 GIT_NO_LFS=(git -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false)
 
-"${GIT_NO_LFS[@]}" clone --no-checkout --shared "${REPO_SRC}" "${STAGE_REPO}"
+"${GIT_NO_LFS[@]}" clone --no-checkout "${REPO_URL}" "${STAGE_REPO}"
 cd "${STAGE_REPO}"
 if "${GIT_NO_LFS[@]}" rev-parse --verify --quiet "origin/${TARGET_REF}" >/dev/null; then
     "${GIT_NO_LFS[@]}" checkout --detach "origin/${TARGET_REF}"
@@ -62,12 +62,11 @@ nvidia-smi
 JUNIT_XML="${REPORT_DIR}/junit-gpu-${COMMIT_SHA}.xml"
 MD_REPORT="${REPORT_DIR}/gpu-verification-${COMMIT_SHA}.md"
 
-# Pass HuggingFace token into container if cached on HPC account
 if [ -z "${HF_TOKEN:-}" ] && [ -f "${HOME}/.cache/huggingface/token" ]; then
     export APPTAINERENV_HF_TOKEN="$(cat "${HOME}/.cache/huggingface/token")"
 fi
-export APPTAINERENV_HF_HOME="${WORKSPACE_DIR}/hf_cache"
-export APPTAINERENV_TORCH_HOME="${WORKSPACE_DIR}/torch_cache"
+export APPTAINERENV_HF_HOME="${TMPDIR}/hf_cache"
+export APPTAINERENV_TORCH_HOME="${TMPDIR}/torch_cache"
 export APPTAINERENV_HTTP_PROXY="${http_proxy}"
 export APPTAINERENV_HTTPS_PROXY="${https_proxy}"
 export APPTAINERENV_http_proxy="${http_proxy}"
@@ -77,7 +76,8 @@ export APPTAINERENV_SF_BACKEND="torch"
 
 set +e
 apptainer exec --nv \
-    --bind "${WORKSPACE_DIR}:${WORKSPACE_DIR}" \
+    --bind "${WORKSPACE_DIR}:${WORKSPACE_DIR}:ro" \
+    --bind "${CACHE_BASE}:${CACHE_BASE}" \
     --bind "${TMPDIR}:${TMPDIR}" \
     "${SIF_IMAGE}" \
     pytest \
@@ -93,7 +93,8 @@ PYTEST_EXIT=$?
 set -e
 
 apptainer exec --nv \
-    --bind "${WORKSPACE_DIR}:${WORKSPACE_DIR}" \
+    --bind "${WORKSPACE_DIR}:${WORKSPACE_DIR}:ro" \
+    --bind "${CACHE_BASE}:${CACHE_BASE}" \
     --bind "${TMPDIR}:${TMPDIR}" \
     "${SIF_IMAGE}" \
     python3 - "${JUNIT_XML}" "${MD_REPORT}" "${SLURM_JOB_ID}" "${COMMIT_SHA}" "${REPORT_TAG}" << 'EOF'
