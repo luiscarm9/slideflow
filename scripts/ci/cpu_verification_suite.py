@@ -265,3 +265,26 @@ def test_pr450_zarr_compressed_segmentation_and_outlines(tmp_path):
     outlines = seg_utils.fast_outlines_list(masks, num_threads=2)
     assert len(outlines) == 2
     assert all(o.ndim == 2 and o.shape[1] == 2 and o.shape[0] > 4 for o in outlines)
+
+
+def test_pr422_dinobloom_extractor_and_registry():
+    """Verify PR #422 DinoBloom registration, 224x224 ViT forward pass, model_size config persistence, and virchow preservation."""
+    from slideflow.model import extractors
+
+    reg = extractors.list_extractors()
+    assert "dinobloom" in reg
+    assert "hoptimus0" in reg
+    assert "virchow" in reg
+
+    ext = sf.build_feature_extractor("dinobloom", model_size="small", pretrained=False, device="cpu")
+    assert ext.num_features == 384
+    tiles = torch.randint(0, 255, (2, 3, 256, 256), dtype=torch.uint8)
+    with torch.no_grad():
+        feats = ext(tiles)
+    assert feats.shape == (2, 384)
+
+    cfg = ext.dump_config()
+    assert cfg["kwargs"]["model_size"] == "small"
+
+    with pytest.raises(ValueError):
+        sf.build_feature_extractor("dinobloom", model_size="invalid_size", pretrained=False, device="cpu")
