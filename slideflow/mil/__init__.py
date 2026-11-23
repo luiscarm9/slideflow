@@ -48,6 +48,11 @@ def mm_attention_mil():
     return MultiModal_Attention_MIL
 
 @register_model
+def attention_im_mil():
+    from .models import Attention_IM_MIL
+    return Attention_IM_MIL
+
+@register_model
 def transmil():
     from .models import TransMIL
     return TransMIL
