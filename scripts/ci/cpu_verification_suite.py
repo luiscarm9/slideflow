@@ -288,3 +288,34 @@ def test_pr422_dinobloom_extractor_and_registry():
 
     with pytest.raises(ValueError):
         sf.build_feature_extractor("dinobloom", model_size="invalid_size", pretrained=False, device="cpu")
+
+
+def test_pr444_multimodal_attention_im_mil():
+    """Verify PR #444 Attention_IM_MIL registry, Kronecker intermediate fusion, UQ, and attention/activation helpers."""
+    import slideflow.mil
+    from slideflow.mil.models import Attention_IM_MIL
+
+    cfg = sf.mil.mil_config(
+        "attention_im_mil",
+        model_kwargs={"clinical_num_features": 4, "z_dim": 16, "z_dim_clinical": 4},
+    )
+    model = cfg.build_model(n_in=20, n_out=2)
+    assert isinstance(model, Attention_IM_MIL)
+
+    model.eval()
+    bags = torch.randn(3, 10, 20)
+    lens = torch.tensor([10, 7, 5])
+    with torch.no_grad():
+        logits, att = model(bags, lens, return_attention=True)
+        uq_means, uq_stds = model(bags, lens, uq=True)
+        att_direct = model.calculate_attention(bags, lens)
+        acts = model.get_last_layer_activations(bags, lens)
+
+    assert logits.shape == (3, 2)
+    assert att.shape == (3, 10, 1)
+    assert uq_means.shape == (3, 2) and uq_stds.shape == (3, 2)
+    assert att_direct.shape == (3, 10, 1)
+    assert acts.shape == (3, 16)
+
+    with pytest.raises(ValueError):
+        Attention_IM_MIL(n_feats=20, n_out=2, clinical_num_features=0)
