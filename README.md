@@ -34,6 +34,7 @@ Designed for both medical researchers and AI enthusiasts, the goal of Slideflow 
   - Integrated [`DinoBloomFeatures`](slideflow/model/extractors/dinobloom.py) (`sf.build_feature_extractor('dinobloom', model_size=...)`) supporting `small` (384-d), `base` (768-d), `large` (1,024-d), and `giant` (1,536-d) DINOv2 hematology foundation backbones.
 - **Multimodal Multiple-Instance Learning (`Attention_IM_MIL`)** ([`docs/pr-audits/PR-444.md`](docs/pr-audits/PR-444.md)):
   - Registered [`attention_im_mil`](slideflow/mil/models/att_im_mil.py) architecture combining WSI tile feature bags with patient-level clinical covariates and modality-level attention attribution (`calculate_attention`, `get_last_layer_activations`).
+- **Ordinal Classification MIL** ([`docs/pr-audits/PR-441.md`](docs/pr-audits/PR-441.md)): Cumulative binary threshold encoding (`OrdinalClassEncoder`), `loss='BCE_ordinal'`, multi-threshold ordinal ROC AUC metrics, and ordinal probability conversion in `train_mil` / `eval_mil`.
 - **CI/CD Governance & NHR@FAU `NVIDIA H100` HPC Verification**:
   - Automated GitHub Actions CI matrix ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), PR audit governance ([`.github/workflows/pr-governance.yml`](.github/workflows/pr-governance.yml)), synthetic pyramidal WSI test suite ([`scripts/ci/cpu_verification_suite.py`](scripts/ci/cpu_verification_suite.py)), and NHR@FAU Helma (`NVIDIA H100`) / Alex (`NVIDIA A40`) Slurm Apptainer GPU verification suite ([`scripts/hpc/gpu_verification_suite.py`](scripts/hpc/gpu_verification_suite.py)).
 
