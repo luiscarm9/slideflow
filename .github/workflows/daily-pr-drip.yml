@@ -231,12 +231,28 @@ jobs:
               time.sleep(15)
               deadline = time.time() + 900
               while time.time() < deadline:
-                  chk = sh(["gh", "pr", "checks", pr_number, "--repo", GH_REPO], check=False)
-                  print(chk.stdout.strip())
-                  if chk.returncode == 0 and "0 failing" in chk.stdout and "0 pending" in chk.stdout:
+                  rollup_res = sh(
+                      ["gh", "pr", "view", pr_number, "--repo", GH_REPO, "--json", "statusCheckRollup"],
+                      check=False,
+                  )
+                  checks = (
+                      json.loads(rollup_res.stdout).get("statusCheckRollup", [])
+                      if rollup_res.returncode == 0 and rollup_res.stdout.strip()
+                      else []
+                  )
+                  summary = [f"{c.get('name')}: {c.get('status')}/{c.get('conclusion')}" for c in checks]
+                  print(" | ".join(summary) if summary else "Waiting for checks to register...")
+                  if len(checks) >= 5 and all(
+                      c.get("status") == "COMPLETED" and c.get("conclusion") == "SUCCESS"
+                      for c in checks
+                  ):
                       break
-                  if "failing" in chk.stdout and not chk.stdout.startswith("0 cancelled, 0 failing"):
-                      raise RuntimeError(f"CI checks failed on PR #{pr_number}:\n{chk.stdout}")
+                  if any(
+                      c.get("status") == "COMPLETED"
+                      and c.get("conclusion") in ("FAILURE", "CANCELLED", "TIMED_OUT")
+                      for c in checks
+                  ):
+                      raise RuntimeError(f"CI checks failed on PR #{pr_number}: {summary}")
                   time.sleep(20)
               else:
                   raise TimeoutError(f"Timed out waiting for CI checks on PR #{pr_number}")
