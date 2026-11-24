@@ -315,16 +315,17 @@ def aggregate_trainval_bags_by_patient(
 def get_labels(
     datasets: Union[sf.Dataset, List[sf.Dataset]],
     outcomes: Union[str, List[str]],
-    classification: bool,
+    model_type: str,
     *,
-    format: str = 'name'
+    format: str = 'name',
+    events: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], np.ndarray]:
     """Get labels for a dataset.
 
     Args:
         datasets (Dataset or list(Dataset)): Dataset(s) containing labels.
         outcomes (str or list(str)): Outcome(s) to extract.
-        classification (bool): Whether to treat outcomes as categorical.
+        model_type (str): Type of model to use.
 
     Keyword Args:
         format (str): Format for categorical labels. Either 'id' or 'name'.
@@ -333,16 +334,29 @@ def get_labels(
     """
     if isinstance(datasets, sf.Dataset):
         datasets = [datasets]
+    if isinstance(model_type, bool):
+        model_type = 'classification' if model_type else 'regression'
 
     # Prepare labels and slides
     labels = {}
-    if classification:
+    if model_type in ['classification', 'ordinal']:
         all_unique = []
         for dts in datasets:
             _labels, _unique = dts.labels(outcomes, format=format)
             labels.update(_labels)
             all_unique += _unique
         unique = np.unique(all_unique)
+    elif model_type == 'survival':
+        if events is None:
+            raise ValueError("For survival models, 'events' parameter must be provided")
+        for dts in datasets:
+            time_labels, _ = dts.labels(outcomes, use_float=True)
+            event_labels, _ = dts.labels(events, use_float=True)
+            for slide in time_labels:
+                t_val = time_labels[slide][0] if isinstance(time_labels[slide], (list, tuple, np.ndarray)) else time_labels[slide]
+                e_val = event_labels[slide][0] if isinstance(event_labels[slide], (list, tuple, np.ndarray)) else event_labels[slide]
+                labels[slide] = (float(t_val), float(e_val))
+        unique = None
     else:
         for dts in datasets:
             _labels, _unique = dts.labels(outcomes, use_float=True)
@@ -351,27 +365,16 @@ def get_labels(
     return labels, unique
 
 
-def rename_df_cols(df, outcomes, categorical, inplace=False):
-    """Rename columns of a DataFrame based on outcomes.
-
-    This standarization of column names enables metrics calculation
-    to be consistent across different models and outcomes.
-
-    Args:
-        df (pd.DataFrame): DataFrame with columns to rename.
-            For classification outcomes, there is assumed to be a single "y_true"
-            column which will be renamed to "{outcome}-y_true", and multiple
-            "y_pred{n}" columns which will be renamed to "{outcome}-y_pred{n}".
-            For regression outcomes, there are assumed to be multiple "y_true{n}"
-            and "y_pred{n}" columns which will be renamed to "{outcome}-y_true{n}"
-            and "{outcome}-y_pred{n}", respectively.
-        outcomes (str or list(str)): Outcome(s) to append to column names.
-            If there are multiple outcome names, these are joined with a hyphen.
-        categorical (bool): Whether the outcomes are categorical.
-
-    """
-    if categorical:
+def rename_df_cols(df, outcomes, model_type=None, *, categorical=None, inplace=False):
+    """Rename columns of a DataFrame based on outcomes."""
+    if model_type is None:
+        model_type = 'classification' if categorical else 'regression'
+    elif isinstance(model_type, bool):
+        model_type = 'classification' if model_type else 'regression'
+    if model_type in ['classification', 'ordinal']:
         return _rename_categorical_df_cols(df, outcomes, inplace=inplace)
+    elif model_type == 'survival':
+        return _rename_survival_df_cols(df, outcomes, inplace=inplace)
     else:
         return _rename_continuous_df_cols(df, outcomes, inplace=inplace)
 
@@ -391,6 +394,13 @@ def _rename_continuous_df_cols(df, outcomes, inplace=False):
     cols_to_rename.update({f'y_true{o}': f"{outcomes[o]}-y_true" for o in range(len(outcomes))})
     return df.rename(columns=cols_to_rename, inplace=inplace)
 
+def _rename_survival_df_cols(df, outcomes, inplace=False):
+    df = df.rename(columns={
+        'y_true0': 'time-y_true',
+        'y_true1': 'event-y_true',
+        'y_pred0': 'time-y_pred'
+    }, inplace=inplace)
+    return df
 
 def create_preds(df: pd.DataFrame) -> None:
     """Convert binary ordinal predictions to class probabilities.
