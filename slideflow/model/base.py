@@ -449,7 +449,7 @@ class _ModelParams:
         # check if loss is custom_[type] and return [type]
         if self.loss.startswith('custom_'):
             return self.loss[len('custom_'):]
-        elif self.loss == 'negative_log_likelihood':
+        elif self.loss in ('negative_log_likelihood', 'CoxProportionalHazardsLoss', 'NLL'):
             return 'survival'
         elif self.loss in self.RegressionLossDict:
             return 'regression'

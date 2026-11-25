@@ -418,7 +418,7 @@ def survival_metrics(
             else f'{c_index:.3f}'
         )
         log.info(f"C-index ({level}-level): {c_str}")
-    except ZeroDivisionError as e:
+    except (ZeroDivisionError, ValueError) as e:
         log.error(f"Error calculating concordance index: {e}")
         c_index = -1
     return {
@@ -845,8 +845,10 @@ def metrics_from_dataset(
         metrics = metrics_by_level(classification_metrics)
     elif model_type == 'regression':
         metrics = metrics_by_level(regression_metrics)
-    else:
+    elif model_type == 'survival':
         metrics = metrics_by_level(survival_metrics)
+    else: 
+        raise ValueError(f"Unrecognized model_type {model_type}")
 
     log.debug(f'Metrics generation complete.')
     return metrics, acc, total_loss
