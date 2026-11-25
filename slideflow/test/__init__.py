@@ -166,7 +166,7 @@ class TestSuite:
         elif model_type == 'survival':
             loss = ('negative_log_likelihood'
                     if sf.backend() == 'tensorflow'
-                    else 'NLL')
+                    else 'CoxProportionalHazardsLoss')
 
         # Create batch train file
         if sweep:
@@ -516,43 +516,37 @@ class TestSuite:
 
         if survival:
             with TaskWrapper("Training a survival model...") as test:
-                if sf.backend() == 'tensorflow':
-                    try:
-                        results = self.project.train(
-                            exp_label='survival',
-                            outcomes='time',
-                            input_header='event',
-                            params=self.setup_hp('survival'),
-                            val_k=1,
-                            pretrain=None,
-                            **train_kwargs
-                        )
-                        _assert_valid_results(results)
-                    except Exception as e:
-                        log.error(traceback.format_exc())
-                        test.fail()
-                else:
-                    test.skip()
+                try:
+                    results = self.project.train(
+                        exp_label='survival',
+                        outcomes='time',
+                        input_header='event',
+                        params=self.setup_hp('survival'),
+                        val_k=1,
+                        pretrain=None,
+                        **train_kwargs
+                    )
+                    _assert_valid_results(results)
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    test.fail()
 
         if multi_survival:
             with TaskWrapper("Training a multi-input survival model...") as test:
-                if sf.backend() == 'tensorflow':
-                    try:
-                        results = self.project.train(
-                            exp_label='multi_survival',
-                            outcomes='time',
-                            input_header=['event', 'category1'],
-                            params=self.setup_hp('survival'),
-                            val_k=1,
-                            pretrain=None,
-                            **train_kwargs
-                        )
-                        _assert_valid_results(results)
-                    except Exception as e:
-                        log.error(traceback.format_exc())
-                        test.fail()
-                else:
-                    test.skip()
+                try:
+                    results = self.project.train(
+                        exp_label='multi_survival',
+                        outcomes='time',
+                        input_header=['event', 'category1'],
+                        params=self.setup_hp('survival'),
+                        val_k=1,
+                        pretrain=None,
+                        **train_kwargs
+                    )
+                    _assert_valid_results(results)
+                except Exception as e:
+                    log.error(traceback.format_exc())
+                    test.fail()
         if from_wsi:
             # Test training from slides without TFRecords
             msg = "Training model directly from slides (from_wsi=True)..."

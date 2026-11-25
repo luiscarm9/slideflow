@@ -38,7 +38,7 @@ def get_module_by_name(module: Union[torch.Tensor, torch.nn.Module],
 @contextlib.contextmanager
 def autocast(device_type: Optional[str] = None, mixed_precision: bool = True):
     """Autocast with mixed precision."""
-    if not mixed_precision or device_type == 'mps':
+    if not mixed_precision or device_type in ('mps', 'cpu'):
         with no_scope():
             yield
     elif version.parse(torch.__version__) >= version.parse("1.12"):
@@ -93,10 +93,16 @@ def print_module_summary(
     hooks = [mod.register_forward_pre_hook(pre_hook) for mod in module.modules()]
     hooks += [mod.register_forward_hook(post_hook) for mod in module.modules()]
 
-    # Run module.
-    module(*inputs)
-    for hook in hooks:
-        hook.remove()
+    # Run module in eval/no_grad mode so summary inspection never mutates BatchNorm running stats.
+    was_training = module.training
+    module.eval()
+    try:
+        with torch.no_grad():
+            module(*inputs)
+    finally:
+        module.train(was_training)
+        for hook in hooks:
+            hook.remove()
 
     # Identify unique outputs, parameters, and buffers.
     tensors_seen = set()
@@ -258,12 +264,15 @@ def eval_from_model(
     if not predict_only and torch_args is None:
         raise ValueError("Argument `torch_args` must be supplied if evaluating.")
 
-    y_true, y_pred, tile_to_slides, locations, y_std = [], [], [], [], []
+    y_true, y_pred, tile_to_slides, locations, y_std, y_pred_ei = [], [], [], [], [], []
     losses, total, num_outcomes, batch_size = 0, 0, 0, 0
     corrects, acc, loss = None, None, None
     model.eval()
     device = get_device(device)
-    _mp = (device.type in ('cuda', 'cpu'))
+    if torch_args is not None and hasattr(torch_args, 'mixed_precision'):
+        _mp = bool(torch_args.mixed_precision) and (device.type == 'cuda')
+    else:
+        _mp = (device.type == 'cuda')
 
     if verbosity != 'silent':
         pb = Progress(SpinnerColumn(), transient=True)
@@ -317,13 +326,35 @@ def eval_from_model(
                         img = torch_args.normalizer.preprocess(img)
 
                     # Slide-level features
-                    if torch_args is not None and torch_args.num_slide_features:
-                        slide_inp = torch.tensor([
-                            torch_args.slide_input[s] for s in slide
-                        ])
-                        inp = (img, slide_inp.to(device))
+                    if model_type != 'survival':
+                        if torch_args is not None and torch_args.num_slide_features:
+                            slide_inp = torch.tensor([
+                                torch_args.slide_input[s] for s in slide
+                            ])
+                            inp = (img, slide_inp.to(device))
+                        else:
+                            inp = (img,)  # type: ignore
                     else:
-                        inp = (img,)  # type: ignore
+                        if torch_args is not None and torch_args.num_slide_features > 1:
+                            slide_inp = torch.tensor(
+                                [torch_args.slide_input[s][1:] for s in slide],
+                                dtype=torch.float32,
+                            )
+                            inp = (img, slide_inp.to(device))
+                        else:
+                            inp = (img,)  # type: ignore
+                        if torch_args is not None and getattr(torch_args, 'slide_input', None):
+                            event_indicator = np.array(
+                                [
+                                    torch_args.slide_input[s][0]
+                                    if s in torch_args.slide_input else 0.0
+                                    for s in slide
+                                ],
+                                dtype=np.float32,
+                            )
+                        else:
+                            event_indicator = np.zeros(len(slide), dtype=np.float32)
+                        y_pred_ei += [event_indicator]
 
                     if uq:
                         res, yp_std, num_outcomes = get_uq_predictions(
@@ -340,7 +371,10 @@ def eval_from_model(
                     if not predict_only:
                         assert torch_args is not None
                         corrects = torch_args.update_corrects(res, yt, corrects)
-                        losses = torch_args.update_loss(res, yt, losses, img.size(0))
+                        if model_type != 'survival':
+                            losses = torch_args.update_loss(res, yt, losses, img.size(0))
+                        else:
+                            losses = torch_args.update_loss(res, yt, event_indicator, losses, img.size(0))
 
                     if isinstance(res, list):
                         res = [r.float().cpu().numpy().copy() for r in res]
@@ -412,6 +446,14 @@ def eval_from_model(
         locations = None  # type: ignore
     if not uq:
         y_std = None  # type: ignore
+
+    # Convert Cox log-hazard (higher = shorter survival) to Slideflow's
+    # survival-score convention (higher = longer survival) for concordance_index,
+    # and append event_indicator as the second prediction column.
+    if model_type == 'survival':
+        y_pred_ei = np.concatenate(y_pred_ei)
+        y_pred_ei = np.expand_dims(y_pred_ei, axis=1)
+        y_pred = [np.concatenate((-y_pred[0], y_pred_ei), axis=1)]
 
     # Create pandas DataFrame from arrays
     df = df_from_pred(y_true, y_pred, y_std, tile_to_slides, locations)
@@ -491,3 +533,48 @@ def xception(*args, **kwargs):
 def nasnetalarge(*args, **kwargs):
     import pretrainedmodels
     return pretrainedmodels.nasnetalarge(*args, **kwargs)
+
+# -----------------------------------------------------------------------------
+
+class CoxProportionalHazardsLoss(torch.nn.modules.loss._Loss):
+    """Cox proportional hazards loss.
+
+    Adapted from https://github.com/havakv/pycox/blob/master/pycox/models/loss.py
+    """
+    def __init__(self, reduction: str = 'mean', eps: float = 1e-7):
+        """
+        Args:
+            reduction (str): Specifies the reduction to apply to the output.
+                'none': no reduction will be applied,
+                'mean': the sum of the output will be divided by the number of elements in the output,
+                'sum': the output will be summed.
+            eps (float): Small constant value to avoid division by zero.
+        """
+        super().__init__(reduction=reduction)
+        self.eps = eps
+
+    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            y_pred (torch.Tensor): Predictions (log_h and events).
+            y_true (torch.Tensor): True labels (durations).
+
+        Returns:
+            torch.Tensor: Loss.
+        """
+        durations = y_true[:, 0]
+        events = y_true[:, 1]
+        log_h = y_pred
+        
+        # Sort by descending duration so cumsum accumulates risk set {j: T_j >= T_i}
+        idx = torch.sort(durations, descending=True)[1]
+        events = events[idx].reshape(-1)
+        log_h = log_h[idx].reshape(-1)
+
+        if events.sum() == 0:
+            return log_h.sum() * 0.0
+
+        gamma = log_h.max()
+        log_cumsum_h = log_h.sub(gamma).exp().cumsum(0).add(self.eps).log().add(gamma)
+        return -log_h.sub(log_cumsum_h).mul(events).sum().div(events.sum())
+
