@@ -252,3 +252,20 @@ def test_optional_pr_features_on_gpu_when_available(gpu_project_env):
         assert out.shape == (2, 384)
         cfg = ext.dump_config()
         assert cfg["class"] == "slideflow.model.extractors.dinobloom.DinoBloomFeatures"
+
+    # PR #463: Dual-magnification lower-mag extraction & CUDA feature concatenation
+    if hasattr(sf.Project, "extract_dual_magnification_features"):
+        P = gpu_project_env["project"]
+        P.extract_lower_mag_tiles_from_tfr(tile_px=128, tile_um=128, mag_ratio=2, target_tile_px=128, report=False)
+        dual_gpu_out = join(gpu_project_env["root"], "dual_mag_gpu")
+        dual_res = P.extract_dual_magnification_features(
+            model_path="resnet18_imagenet",
+            output_dir=dual_gpu_out,
+            device="cuda",
+            high_mag_um=128,
+            low_mag_um=256,
+            tile_px=128,
+            batch_size=8,
+            num_workers=0,
+        )
+        assert dual_res.num_features == 1024
