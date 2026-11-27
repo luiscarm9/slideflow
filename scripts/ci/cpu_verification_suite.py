@@ -12,7 +12,7 @@ and verifies:
 
 import csv
 import os
-from os.path import join
+from os.path import exists, join
 
 import numpy as np
 import pytest
@@ -647,3 +647,356 @@ def test_pr463_dual_magnification_extraction_and_features(tmp_path):
         pt_bag = torch.load(join(dual_feats.concatenated_dir, f"dual_slide_{idx}.pt"))
         assert pt_bag.shape == (16, 1024)
         assert torch.isfinite(pt_bag).all().item()
+
+
+def test_patch_311_mil_eval_heatmaps_and_dir_bags(tmp_path):
+    """Regression test for upstream issues #456, #428, #457, and #431."""
+    import glob
+    import slideflow as sf
+    from slideflow.mil import eval_mil, generate_attention_heatmaps, mil_config, train_mil
+
+    slides_dir = tmp_path / "mil_hm_slides"
+    slides_dir.mkdir()
+    anns_path = str(tmp_path / "mil_hm_anns.csv")
+    bags_dir = tmp_path / "mil_hm_bags"
+    bags_dir.mkdir()
+
+    with open(anns_path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["patient", "slide", "category"])
+        for idx in range(4):
+            sname = f"hm_slide_{idx}"
+            _make_synthetic_histology_tiff(
+                str(slides_dir / f"{sname}.tiff"), width=256, height=256, seed=700 + idx
+            )
+            writer.writerow([f"pt_{idx}", sname, "pos" if idx % 2 == 0 else "neg"])
+
+    P = sf.create_project(
+        root=str(tmp_path / "mil_hm_proj"),
+        slides=str(slides_dir),
+        annotations=anns_path,
+    )
+    P.extract_tiles(
+        tile_px=64,
+        tile_um=32,
+        qc=None,
+        roi_method="ignore",
+        whitespace_fraction=1.0,
+        grayspace_fraction=1.0,
+        num_threads=2,
+    )
+    dts = P.dataset(tile_px=64, tile_um=32)
+    rng = np.random.default_rng(311)
+    for slide in dts.slides():
+        # 4x4 grid of 128px-step tile centers in a 256x256 slide (at 0.25 mpp -> 32um = 128px)
+        locs = np.array([[64, 64], [192, 64], [64, 192], [192, 192]], dtype=np.int64)
+        feats = torch.tensor(rng.normal(size=(4, 16)), dtype=torch.float32)
+        torch.save(feats, str(bags_dir / f"{slide}.pt"))
+        np.savez(str(bags_dir / f"{slide}.index.npz"), locs)
+
+    # Write minimal bags_config.json matching dataset tile size
+    sf.util.write_json(
+        {"tile_px": 64, "tile_um": 32, "extractor": {"class": "stub", "kwargs": {}}},
+        str(bags_dir / "bags_config.json"),
+    )
+
+    cfg = mil_config(
+        "attention_mil",
+        epochs=1,
+        batch_size=2,
+        lr=1e-3,
+        bag_size=4,
+        fit_one_cycle=False,
+    )
+    train_out = str(tmp_path / "mil_hm_train")
+    train_mil(
+        cfg,
+        train_dataset=dts,
+        val_dataset=dts,
+        outcomes="category",
+        bags=str(bags_dir),
+        outdir=train_out,
+        attention_heatmaps=False,
+    )
+
+    eval_out = str(tmp_path / "mil_hm_eval")
+    df = eval_mil(
+        weights=train_out,
+        dataset=dts,
+        outcomes="category",
+        bags=str(bags_dir),  # directory string (#457)
+        outdir=eval_out,
+        attention_heatmaps=True,  # unimodal model (#456 / #428)
+    )
+    assert len(df) == 4
+    model_dirs = glob.glob(join(eval_out, "*"))
+    assert len(model_dirs) == 1
+    hm_pngs = sorted(glob.glob(join(model_dirs[0], "heatmaps", "*_attn.png")))
+    assert len(hm_pngs) == 4, f"Expected 4 attention heatmaps from eval_mil, got {hm_pngs}"
+
+    # Verify #431: generate_attention_heatmaps accepts bag dir + attention dir
+    att_dir = join(model_dirs[0], "attention")
+    hm_from_dir = str(tmp_path / "hm_from_dir")
+    generate_attention_heatmaps(
+        outdir=hm_from_dir,
+        dataset=dts,
+        bags=str(bags_dir),
+        attention=att_dir,
+    )
+    assert len(glob.glob(join(hm_from_dir, "*_attn.png"))) == 4
+
+    # Verify #431: generate_attention_heatmaps accepts list of .npz attention file paths
+    bag_list = sorted(dts.get_bags(str(bags_dir)))
+    att_files = [join(att_dir, f"{sf.util.path_to_name(b)}_att.npz") for b in bag_list]
+    hm_from_files = str(tmp_path / "hm_from_files")
+    generate_attention_heatmaps(
+        outdir=hm_from_files,
+        dataset=dts,
+        bags=bag_list,
+        attention=att_files,
+    )
+    assert len(glob.glob(join(hm_from_files, "*_attn.png"))) == 4
+
+
+def test_patch_311_virchow_and_vahadane_compat(monkeypatch):
+    """Regression test for upstream issues #427 (Virchow HF default) and #451 (SPAMS fallback)."""
+    import timm
+    import slideflow as sf
+    from slideflow.norm import StainNormalizer
+
+    class _StubVirchow(torch.nn.Module):
+        def forward(self, x):
+            b = x.shape[0]
+            return torch.zeros((b, 257, 1280), dtype=torch.float32, device=x.device)
+
+    calls = []
+
+    def _fake_create_model(model_name, **kwargs):
+        calls.append((model_name, kwargs))
+        return _StubVirchow()
+
+    monkeypatch.setattr(timm, "create_model", _fake_create_model)
+    ext = sf.build_feature_extractor("virchow", device="cpu")
+    assert len(calls) == 1
+    assert calls[0][0] == "hf-hub:paige-ai/Virchow"
+    assert calls[0][1].get("pretrained") is True
+    assert ext.num_features == 2560
+    sample = torch.randint(0, 255, (2, 3, 224, 224), dtype=torch.uint8)
+    out = ext(sample)
+    assert out.shape == (2, 2560)
+
+    # Verify actionable error when HF download fails
+    def _failing_create_model(*args, **kwargs):
+        raise OSError("401 Unauthorized")
+
+    monkeypatch.setattr(timm, "create_model", _failing_create_model)
+    with pytest.raises(RuntimeError, match="huggingface-cli login"):
+        sf.build_feature_extractor("virchow", device="cpu")
+
+    # Verify #451: vahadane defaults to sklearn and vahadane_spams gracefully falls back without spams
+    rng = np.random.default_rng(451)
+    # H&E-like synthetic tissue patch (non-white pink/purple)
+    img = np.zeros((128, 128, 3), dtype=np.uint8)
+    img[:, :, 0] = rng.integers(140, 210, size=(128, 128), dtype=np.uint8)
+    img[:, :, 1] = rng.integers(80, 150, size=(128, 128), dtype=np.uint8)
+    img[:, :, 2] = rng.integers(130, 200, size=(128, 128), dtype=np.uint8)
+
+    norm_default = StainNormalizer("vahadane")
+    assert norm_default.n.preset_tag == "vahadane_sklearn"
+    out_default = norm_default.rgb_to_rgb(img)
+    assert out_default.shape == img.shape and out_default.dtype == np.uint8
+
+    norm_spams = StainNormalizer("vahadane_spams")
+    out_spams = norm_spams.rgb_to_rgb(img)
+    assert out_spams.shape == img.shape and out_spams.dtype == np.uint8
+
+
+def test_patch_311_generate_feature_bags_min_tiles_and_auto_dataset(tmp_path):
+    """Regression test for upstream issue #435 (min_tiles default & auto_dataset_allow_none)."""
+    import slideflow as sf
+    from slideflow import project_utils
+
+    slides_dir = tmp_path / "mt_slides"
+    slides_dir.mkdir()
+    anns_path = str(tmp_path / "mt_anns.csv")
+    with open(anns_path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["patient", "slide", "category"])
+        _make_synthetic_histology_tiff(
+            str(slides_dir / "small_slide.tiff"), width=256, height=256, seed=435
+        )
+        writer.writerow(["pt_0", "small_slide", "pos"])
+
+    P = sf.create_project(
+        root=str(tmp_path / "mt_proj"),
+        slides=str(slides_dir),
+        annotations=anns_path,
+    )
+    # 256x256 at 0.25 mpp -> 4 tiles (< 16!)
+    P.extract_tiles(
+        tile_px=64,
+        tile_um=32,
+        qc=None,
+        roi_method="ignore",
+        whitespace_fraction=1.0,
+        grayspace_fraction=1.0,
+        num_threads=1,
+    )
+    dts = P.dataset(tile_px=64, tile_um=32)
+    assert dts.num_tiles == 4
+
+    out_bags = P.generate_feature_bags(
+        "resnet18_imagenet",
+        dataset=dts,
+        outdir=str(tmp_path / "mt_bags"),
+        batch_size=2,
+        num_workers=0,
+    )
+    bag_pt = join(out_bags, "small_slide.pt")
+    assert exists(bag_pt), "Slide with <16 tiles should not be silently dropped by default"
+    assert torch.load(bag_pt).shape[0] == 4
+
+    # Verify _filters_to_dataset allows filter args when dataset=None is forwarded
+    called = {}
+
+    class _DummyProj:
+        def dataset(self, **kw):
+            called["dataset_kw"] = kw
+            return "auto_ds"
+
+    def _dummy_method(obj, model, *, dataset=None, **kw):
+        called["method"] = (model, dataset, kw)
+        return "ok"
+
+    wrapped = project_utils.auto_dataset_allow_none(_dummy_method)
+    orig_get_cfg = sf.util.get_model_config
+    try:
+        sf.util.get_model_config = lambda m: {"hp": {"tile_px": 64, "tile_um": 32}}
+        res = wrapped(_DummyProj(), "fake_model", min_tiles=2)
+        assert res == "ok"
+        assert called["dataset_kw"]["min_tiles"] == 2
+        assert called["method"][1] == "auto_ds"
+    finally:
+        sf.util.get_model_config = orig_get_cfg
+
+
+def test_patch_311_custom_model_and_loss_eval_load(tmp_path):
+    """Regression test for upstream issue #449 (custom model & custom loss with evaluate/load)."""
+    import glob
+    import slideflow as sf
+    from slideflow.model import ModelParams
+
+    class _TinyCustomNet(torch.nn.Module):
+        def __init__(self, num_classes=2):
+            super().__init__()
+            self.pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+            self.fc = torch.nn.Linear(3, num_classes)
+
+        def forward(self, x):
+            return self.fc(self.pool(x).flatten(1))
+
+    class _TinyCustomLoss(torch.nn.CrossEntropyLoss):
+        pass
+
+    slides_dir = tmp_path / "cm_slides"
+    slides_dir.mkdir()
+    anns_path = str(tmp_path / "cm_anns.csv")
+    with open(anns_path, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["patient", "slide", "category"])
+        for idx in range(2):
+            sname = f"cm_slide_{idx}"
+            _make_synthetic_histology_tiff(
+                str(slides_dir / f"{sname}.tiff"), width=256, height=256, seed=449 + idx
+            )
+            writer.writerow([f"pt_{idx}", sname, "pos" if idx == 0 else "neg"])
+
+    P = sf.create_project(
+        root=str(tmp_path / "cm_proj"),
+        slides=str(slides_dir),
+        annotations=anns_path,
+    )
+    P.extract_tiles(
+        tile_px=64,
+        tile_um=32,
+        qc=None,
+        roi_method="ignore",
+        whitespace_fraction=1.0,
+        grayspace_fraction=1.0,
+        num_threads=1,
+    )
+    dts = P.dataset(tile_px=64, tile_um=32)
+
+    hp = ModelParams(
+        tile_px=64,
+        tile_um=32,
+        model=_TinyCustomNet,
+        loss={"type": "classification", "fn": _TinyCustomLoss},
+        epochs=1,
+        batch_size=2,
+        learning_rate=1e-3,
+        include_top=False,
+        augment=False,
+    )
+    # Verify class-level ModelDict/AllLossDict were NOT polluted
+    assert "custom" not in ModelParams.ModelDict
+    assert "custom_classification" not in ModelParams.AllLossDict
+
+    P.train(
+        "category",
+        params=hp,
+        val_strategy="none",
+        dataset=dts,
+        mixed_precision=False,
+        num_workers=0,
+    )
+
+    model_zips = sorted(glob.glob(join(P.models_dir, "*", "*_epoch1.zip")))
+    assert len(model_zips) == 1
+    model_zip = model_zips[0]
+
+    custom_objs = {
+        "custom": _TinyCustomNet,
+        "custom_classification": _TinyCustomLoss,
+    }
+    loaded_model = sf.model.load(model_zip, custom_objects=custom_objs)
+    assert isinstance(loaded_model, torch.nn.Module)
+
+    eval_res = P.evaluate(
+        model_zip,
+        outcomes="category",
+        dataset=dts,
+        mixed_precision=False,
+        num_workers=0,
+        custom_objects=custom_objs,
+    )
+    assert isinstance(eval_res, dict)
+
+
+def test_patch_311_heatmap_extent_40x_no_drift():
+    """Regression test for upstream issue #440 (progressive drift with tile_um='40x')."""
+    from types import SimpleNamespace
+    from slideflow.heatmap import calculate_heatmap_extent
+
+    # Simulate a 40x SVS slide where mpp=0.2520 causes wsi.tile_um = int(256*0.2520) = 64
+    # while true full_extract_px=256 and full_stride=128.
+    wsi = SimpleNamespace(
+        mpp=0.2520,
+        tile_px=256,
+        tile_um=64,
+        stride_div=2,
+        full_extract_px=256,
+        full_stride=128,
+        dimensions=(25600, 12800),
+    )
+    thumb = SimpleNamespace(size=(2048, 1024))
+    grid = np.zeros((99, 199, 2), dtype=np.float32)
+
+    left, right, bottom, top = calculate_heatmap_extent(wsi, thumb, grid)
+    ratio_x = 25600 / 2048  # 12.5
+    ratio_y = 12800 / 1024  # 12.5
+    expected_offset = 256 / 2 - 128 / 2  # 64.0
+    assert np.isclose(left, expected_offset / ratio_x)
+    assert np.isclose(right, (expected_offset + 199 * 128) / ratio_x)
+    assert np.isclose(bottom, (expected_offset + 99 * 128) / ratio_y)
+    assert np.isclose(top, expected_offset / ratio_y)

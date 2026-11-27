@@ -69,16 +69,16 @@ def _filters_to_dataset(obj, method, model, *args, **kwargs):
         try:
             config = sf.util.get_model_config(model)
         except (errors.ModelParamsNotFoundError, TypeError):
-            if 'dataset' in kwargs:
+            if kwargs.get('dataset') is not None:
                 config = None
             else:
                 raise
     elif model is not None:
-        if 'dataset' in kwargs:
+        if kwargs.get('dataset') is not None:
             config = None
         else:
             raise ValueError("The 'dataset' keyword argument must be supplied; a dataset cannot be auto-inferred.")
-    if has_filters and 'dataset' in kwargs:
+    if has_filters and kwargs.get('dataset') is not None:
         k_s = ', '.join(filter_keys)
         raise errors.ProjectError(
             f"Cannot supply both `dataset` and filter arguments ({k_s})."

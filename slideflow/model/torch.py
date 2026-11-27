@@ -353,18 +353,29 @@ class ModelParams(_base._ModelParams):
             model_kw = [
                 param.name
                 for param in model_fn_sig.parameters.values()
-                if param.kind == param.POSITIONAL_OR_KEYWORD
+                if param.kind in (
+                    param.POSITIONAL_OR_KEYWORD,
+                    param.KEYWORD_ONLY,
+                )
             ]
+            has_var_kw = any(
+                param.kind == param.VAR_KEYWORD
+                for param in model_fn_sig.parameters.values()
+            )
             call_kw = {}
             if 'image_size' in model_kw:
                 call_kw.update(dict(image_size=self.tile_px))
             if (version.parse(torchvision.__version__) >= version.parse("0.13")
                and not self.model.startswith('timm_')):
                 # New Torchvision API
-                w = 'DEFAULT' if pretrain == 'imagenet' else pretrain
-                call_kw.update(dict(weights=w))  # type: ignore
+                if 'weights' in model_kw or has_var_kw:
+                    w = 'DEFAULT' if pretrain == 'imagenet' else pretrain
+                    call_kw.update(dict(weights=w))  # type: ignore
+                elif 'pretrained' in model_kw:
+                    call_kw.update(dict(pretrained=bool(pretrain)))  # type: ignore
             else:
-                call_kw.update(dict(pretrained=pretrain))  # type: ignore
+                if 'pretrained' in model_kw or has_var_kw:
+                    call_kw.update(dict(pretrained=pretrain))  # type: ignore
             _model = model_fn(**call_kw)
 
         # Add final layers to models
@@ -530,8 +541,7 @@ class Trainer:
         else:
             self.slide_input = None  # type: ignore
 
-        if custom_objects is not None:
-            log.warn("custom_objects argument ignored in PyTorch backend.")
+        self.custom_objects = custom_objects
 
         # Enable or disable Tensorflow-32
         # Allows PyTorch to internally use tf32 for matmul and convolutions
@@ -2808,17 +2818,23 @@ class UncertaintyInterface(Features):
 
 # -----------------------------------------------------------------------------
 
-def load(path: str) -> torch.nn.Module:
+def load(
+    path: str,
+    custom_objects: Optional[Dict[str, Any]] = None
+) -> torch.nn.Module:
     """Load a model trained with Slideflow.
 
     Args:
         path (str): Path to saved model. Must be a model trained in Slideflow.
+        custom_objects (dict, optional): Dictionary mapping custom model or
+            loss names (e.g., ``'custom'``, ``'custom_classification'``) to
+            custom classes or callables. Defaults to None.
 
     Returns:
         torch.nn.Module: Loaded model.
     """
     config = sf.util.get_model_config(path)
-    hp = ModelParams.from_dict(config['hp'])
+    hp = ModelParams.from_dict(config['hp'], custom_objects=custom_objects)
     if config['model_type'] == 'survival':
         num_classes = 1
     elif len(config['outcomes']) == 1 or config['model_type'] == 'regression':

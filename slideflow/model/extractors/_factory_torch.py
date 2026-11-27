@@ -36,9 +36,9 @@ def dinobloom(**kwargs):
     return DinoBloomFeatures(**kwargs)
 
 @register_torch
-def virchow(weights, **kwargs):
+def virchow(weights=None, **kwargs):
     from .virchow import VirchowFeatures
-    return VirchowFeatures(weights, **kwargs)
+    return VirchowFeatures(weights=weights, **kwargs)
 
 @register_torch
 def vit(**kwargs):

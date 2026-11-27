@@ -45,25 +45,42 @@ class VirchowFeatures(TorchFeatureExtractor):
 }
 """
 
-    def __init__(self, weights, device=None, **kwargs):
+    def __init__(self, weights=None, device=None, **kwargs):
         super().__init__(**kwargs)
 
         from slideflow.model import torch_utils
 
         self.device = torch_utils.get_device(device)
-        self.model = timm.create_model(
-            "vit_huge_patch14_224",
-            img_size=224,
-            patch_size=14,
-            init_values=1e-5,
-            num_classes=0,
-            mlp_ratio=5.3375,
-            global_pool="",
-            mlp_layer=SwiGLUPacked,
-            act_layer=torch.nn.SiLU
-        )
-        td = torch.load(weights, map_location=self.device)
-        self.model.load_state_dict(td, strict=True)
+        if weights is None:
+            try:
+                self.model = timm.create_model(
+                    "hf-hub:paige-ai/Virchow",
+                    pretrained=True,
+                    mlp_layer=SwiGLUPacked,
+                    act_layer=torch.nn.SiLU
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Failed to download Virchow weights from Hugging Face "
+                    "('hf-hub:paige-ai/Virchow'). Ensure you have requested "
+                    "access at https://huggingface.co/paige-ai/Virchow and "
+                    "authenticated with `huggingface-cli login`, or supply a "
+                    "local checkpoint via `weights='/path/to/pytorch_model.bin'`."
+                ) from exc
+        else:
+            self.model = timm.create_model(
+                "vit_huge_patch14_224",
+                img_size=224,
+                patch_size=14,
+                init_values=1e-5,
+                num_classes=0,
+                mlp_ratio=5.3375,
+                global_pool="",
+                mlp_layer=SwiGLUPacked,
+                act_layer=torch.nn.SiLU
+            )
+            td = torch.load(weights, map_location=self.device)
+            self.model.load_state_dict(td, strict=True)
         self.model.to(self.device)
         self.model.eval()
 

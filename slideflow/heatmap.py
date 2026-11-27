@@ -1056,8 +1056,17 @@ def calculate_heatmap_extent(
         grid: np.ndarray
 ) -> Tuple[float, float, float, float]:
     """Calculate implot extent for a heatmap grid."""
-    full_extract = int(wsi.tile_um / wsi.mpp)
-    wsi_stride = int(full_extract / wsi.stride_div)
+    # Prefer the exact extraction size and stride computed by WSI rather than
+    # re-deriving from `wsi.tile_um / wsi.mpp`. In magnification mode (e.g.
+    # tile_um='40x'), `wsi.tile_um` is truncated to int, so recomputing
+    # `int(wsi.tile_um / wsi.mpp)` can under-estimate stride by 1-2 px per
+    # tile and cause progressive bottom-right misalignment on large slides.
+    full_extract = getattr(wsi, 'full_extract_px', None)
+    if full_extract is None:
+        full_extract = int(wsi.tile_um / wsi.mpp)
+    wsi_stride = getattr(wsi, 'full_stride', None)
+    if wsi_stride is None:
+        wsi_stride = int(np.round(full_extract / wsi.stride_div))
     _overlay_wsi_dim = (wsi_stride * (grid.shape[1]),
                         wsi_stride * (grid.shape[0]))
     _overlay_offset_wsi_dim = (

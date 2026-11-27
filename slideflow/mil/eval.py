@@ -844,16 +844,30 @@ def run_eval(
 
     # Attention heatmaps
     # Not supported for multimodal models
-    if attention_heatmaps and not config.is_multimodal:
+    if attention_heatmaps and config.is_multimodal:
         log.warning("Cannot generate attention heatmaps for multi-modal models.")
     elif outdir and y_att and attention_heatmaps:
-        generate_attention_heatmaps(
-            outdir=join(model_dir, 'heatmaps'),
-            dataset=dataset,
-            bags=bags,  # type: ignore
-            attention=y_att,
-            **heatmap_kwargs
-        )
+        if 'slide' not in df.columns:
+            log.warning(
+                "Cannot generate per-slide attention heatmaps when evaluating "
+                "with patient-level aggregation."
+            )
+        else:
+            if isinstance(bags, (str, os.PathLike)):
+                resolved_bags = dataset.get_bags(str(bags))
+            else:
+                resolved_bags = list(bags)
+            bag_by_slide = {path_to_name(b): b for b in resolved_bags}
+            ordered_bags = [
+                bag_by_slide[s] for s in df['slide'].values if s in bag_by_slide
+            ]
+            generate_attention_heatmaps(
+                outdir=join(model_dir, 'heatmaps'),
+                dataset=dataset,
+                bags=ordered_bags,
+                attention=y_att,
+                **heatmap_kwargs
+            )
 
     return df
 
@@ -1111,11 +1125,27 @@ def generate_mil_features(
     return MILFeatures(model, bags, slides=slides, config=config, dataset=dataset)
 
 
+def _load_attention_values(
+    att: Union[np.ndarray, str, os.PathLike]
+) -> np.ndarray:
+    """Load an attention array from memory or from an exported .npz/.npy file."""
+    if isinstance(att, (str, os.PathLike)):
+        loaded = np.load(att)
+        if isinstance(loaded, np.lib.npyio.NpzFile):
+            try:
+                key = 'arr_0' if 'arr_0' in loaded.files else loaded.files[0]
+                return np.asarray(loaded[key])
+            finally:
+                loaded.close()
+        return np.asarray(loaded)
+    return np.asarray(att)
+
+
 def generate_attention_heatmaps(
     outdir: str,
     dataset: "sf.Dataset",
-    bags: Union[List[str], np.ndarray],
-    attention: Union[np.ndarray, List[np.ndarray]],
+    bags: Union[str, os.PathLike, List[str], np.ndarray],
+    attention: Union[str, os.PathLike, np.ndarray, List[Union[np.ndarray, str, os.PathLike]]],
     **kwargs
 ) -> None:
     """Generate and save attention heatmaps for a dataset.
@@ -1123,11 +1153,15 @@ def generate_attention_heatmaps(
     Args:
         outdir (str): Path at which to save heatmap images.
         dataset (sf.Dataset): Dataset.
-        bags (str, list(str)): List of bag file paths.
-            Each bag should contain PyTorch array of features from all tiles in
-            a slide, with the shape ``(n_tiles, n_features)``.
-        attention (list(np.ndarray)): Attention scores for each slide.
-            Length of ``attention`` should equal the length of ``bags``.
+        bags (str, PathLike, list(str)): Path to a directory of ``.pt`` feature
+            bags, or a list of bag file paths. Each bag should contain a PyTorch
+            array of features from all tiles in a slide, with shape
+            ``(n_tiles, n_features)``.
+        attention (str, PathLike, list(np.ndarray | str)): Attention scores for
+            each slide. May be a list/array of per-slide attention arrays, a
+            list of ``.npz``/``.npy`` attention file paths (matching the order
+            of ``bags``), or a directory containing exported ``<slide>_att.npz``
+            / ``<slide>_att.npy`` files.
 
     Keyword args:
         interpolation (str, optional): Interpolation strategy for smoothing
@@ -1142,7 +1176,37 @@ def generate_attention_heatmaps(
 
 
     """
-    assert len(bags) == len(attention)
+    if isinstance(bags, (str, os.PathLike)):
+        bags = dataset.get_bags(str(bags))
+
+    if isinstance(attention, (str, os.PathLike)):
+        att_dir = str(attention)
+        if not os.path.isdir(att_dir):
+            raise FileNotFoundError(f"Attention directory not found: {att_dir}")
+        matched_bags = []
+        matched_att = []
+        for bag in bags:
+            slidename = sf.util.path_to_name(bag)
+            candidates = (
+                join(att_dir, f'{slidename}_att.npz'),
+                join(att_dir, f'{slidename}_att.npy'),
+                join(att_dir, f'{slidename}.npz'),
+                join(att_dir, f'{slidename}.npy'),
+            )
+            found = next((c for c in candidates if exists(c)), None)
+            if found is None:
+                log.info(f"Unable to find attention file for {slidename} in {att_dir}")
+                continue
+            matched_bags.append(bag)
+            matched_att.append(found)
+        bags = matched_bags
+        attention = matched_att
+
+    if len(bags) != len(attention):
+        raise ValueError(
+            f"Number of bags ({len(bags)}) does not match number of attention "
+            f"entries ({len(attention)})."
+        )
     if not exists(outdir):
         os.makedirs(outdir)
     pb = Progress(transient=True)
@@ -1168,6 +1232,8 @@ def generate_attention_heatmaps(
                 )
                 continue
 
+            att_values = _load_attention_values(attention[i])
+
             # Handle the case of multiple attention values at each tile location.
             heatmap_kwargs = dict(
                 locations=locations,
@@ -1176,10 +1242,15 @@ def generate_attention_heatmaps(
                 tile_um=dataset.tile_um,
                 **kwargs
             )
-            if (len(attention[i].shape) < 2) or (attention[i].shape[0] == 1):
+            if (len(att_values.shape) < 2) or (att_values.shape[0] == 1):
                 # If there is a single attention value, create a single map.
+                vals_1d = (
+                    att_values[0]
+                    if (att_values.ndim == 2 and att_values.shape[0] == 1)
+                    else att_values
+                )
                 sf.util.location_heatmap(
-                    values=attention[i],
+                    values=vals_1d,
                     filename=join(outdir, f'{sf.util.path_to_name(slide_path)}_attn.png'),
                     **heatmap_kwargs
                 )
@@ -1187,14 +1258,14 @@ def generate_attention_heatmaps(
                 # Otherwise, create a separate heatmap for each value,
                 # as well as a heatmap reduced by mean.
                 # The attention values are assumed to have the shape (n_attention, n_tiles).
-                for att_idx in range(attention[i].shape[0]):
+                for att_idx in range(att_values.shape[0]):
                     sf.util.location_heatmap(
-                        values=attention[i][att_idx, :],
+                        values=att_values[att_idx, :],
                         filename=join(outdir, f'{sf.util.path_to_name(slide_path)}_attn-{att_idx}.png'),
                         **heatmap_kwargs
                     )
                 sf.util.location_heatmap(
-                        values=np.mean(attention[i], axis=0),
+                        values=np.mean(att_values, axis=0),
                         filename=join(outdir, f'{sf.util.path_to_name(slide_path)}_attn-avg.png'),
                         **heatmap_kwargs
                     )
