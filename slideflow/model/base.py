@@ -200,9 +200,13 @@ class _ModelParams:
         return self.to_dict() == other.to_dict()
 
     @classmethod
-    def from_dict(cls, hp_dict: Dict) -> "_ModelParams":
+    def from_dict(
+        cls,
+        hp_dict: Dict,
+        custom_objects: Optional[Dict[str, Any]] = None
+    ) -> "_ModelParams":
         obj = cls()
-        obj.load_dict(hp_dict)
+        obj.load_dict(hp_dict, custom_objects=custom_objects)
         return obj
 
     @property
@@ -215,12 +219,14 @@ class _ModelParams:
             assert len(m) == 1
             model_name, model = list(m.items())[0]
             assert isinstance(model_name, str)
+            self.ModelDict = dict(self.ModelDict)
             self.ModelDict.update(m)
             self._model = model_name
         elif isinstance(m, str):
             assert m in self.ModelDict or m.startswith('timm_')
             self._model = m
         else:
+            self.ModelDict = dict(self.ModelDict)
             self.ModelDict.update({'custom': m})
             self._model = 'custom'
 
@@ -240,6 +246,7 @@ class _ModelParams:
                 raise ValueError("Custom loss type must be one of: ",
                                  ', '.join(valid_loss_types))
             loss_name = 'custom_' + l['type']
+            self.AllLossDict = dict(self.AllLossDict)
             self.AllLossDict.update({loss_name: l['fn']})
             self._loss = loss_name
         elif isinstance(l, str):
@@ -292,7 +299,34 @@ class _ModelParams:
         else:
             return sf.norm.autoselect(self.normalizer, self.normalizer_source, **kwargs)
 
-    def load_dict(self, hp_dict: Dict[str, Any]) -> None:
+    def load_dict(
+        self,
+        hp_dict: Dict[str, Any],
+        custom_objects: Optional[Dict[str, Any]] = None
+    ) -> None:
+        if custom_objects:
+            model_key = hp_dict.get('model')
+            if isinstance(model_key, str):
+                if model_key in custom_objects:
+                    self.ModelDict = dict(self.ModelDict)
+                    self.ModelDict[model_key] = custom_objects[model_key]
+                elif 'model' in custom_objects and model_key not in self.ModelDict:
+                    self.ModelDict = dict(self.ModelDict)
+                    self.ModelDict[model_key] = custom_objects['model']
+
+            loss_key = hp_dict.get('loss')
+            if isinstance(loss_key, str):
+                custom_loss = None
+                if loss_key in custom_objects:
+                    custom_loss = custom_objects[loss_key]
+                elif 'loss' in custom_objects and loss_key not in self.AllLossDict:
+                    custom_loss = custom_objects['loss']
+                if isinstance(custom_loss, dict) and 'fn' in custom_loss:
+                    custom_loss = custom_loss['fn']
+                if custom_loss is not None:
+                    self.AllLossDict = dict(self.AllLossDict)
+                    self.AllLossDict[loss_key] = custom_loss
+
         for key, value in hp_dict.items():
             if not hasattr(self, key):
                 log.error(f'Unrecognized hyperparameter {key}; unable to load')

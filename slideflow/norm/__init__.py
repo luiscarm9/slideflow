@@ -35,7 +35,7 @@ class StainNormalizer:
         'reinhard_fast': reinhard.ReinhardFastNormalizer,
         'reinhard_mask': reinhard.ReinhardMaskNormalizer,
         'reinhard_fast_mask': reinhard.ReinhardFastMaskNormalizer,
-        'vahadane': vahadane.VahadaneSpamsNormalizer,
+        'vahadane': vahadane.VahadaneSklearnNormalizer,
         'vahadane_sklearn': vahadane.VahadaneSklearnNormalizer,
         'vahadane_spams': vahadane.VahadaneSpamsNormalizer,
         'augment': augment.AugmentNormalizer

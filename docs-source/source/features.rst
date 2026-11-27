@@ -114,7 +114,7 @@ Image preprocessing
 Each feature extractor includes a default image preprocessing pipeline that matches the original implementation. However, preprocessing can also be manually adjusted using various keyword arguments when creating a feature extractor.
 
 - **resize**: ``int`` or ``bool``. If an ``int``, resizes images to this size. If ``True``, resizes images to the input size of the feature extractor. Default is ``False``.
-- **center_crop**: ``int`` or ``bool``. If an ``int``, crops images to this size. If ``True``, crops images to the input size of the feature extractor. Center-cropping happens after resizing, if both are used. Default is ``False``.
+- **center_crop**: ``int`` or ``bool``. If an ``int``, crops images to this size. If ``True``, crops images to the input size of the feature extractor. Center-cropping happens before resizing, if both are used. Default is ``False``.
 - **interpolation**: ``str``. Interpolation method for resizing images. Default is ``bilinear`` for most models, but is ``bicubic`` for GigaPath and Virchow.
 - **antialias**: ``bool``. Whether to apply antialiasing to resized images. Default is ``False`` (matching the default behavior of torchvision < 0.17).
 - **norm_mean**: ``list``. Mean values for image normalization. Default is ``[0.485, 0.456, 0.406]`` for all models except PLIP.

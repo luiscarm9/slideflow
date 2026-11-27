@@ -434,7 +434,7 @@ class Project:
         # Load hyperparameters from saved model
         config = sf.util.get_model_config(model)
         hp = ModelParams()
-        hp.load_dict(config['hp'])
+        hp.load_dict(config['hp'], custom_objects=custom_objects)
         model_name = f"eval-{basename(model)}"
 
         # If not provided, detect outcomes from model config
@@ -1910,7 +1910,7 @@ class Project:
         *,
         filters: Optional[Dict] = None,
         filter_blank: Optional[Union[str, List[str]]] = None,
-        min_tiles: int = 16,
+        min_tiles: int = 0,
         max_tiles: int = 0,
         **kwargs: Any
     ) -> str:
@@ -1937,7 +1937,7 @@ class Project:
                 blank values in these patient annotation columns.
                 Defaults to None.
             min_tiles (int, optional): Only include slides with this minimum
-                number of tiles. Defaults to 16.
+                number of tiles. Defaults to 0.
             max_tiles (int, optional): Only include maximum of this many tiles
                 per slide. Defaults to 0 (all tiles).
             layers (list): Which model layer(s) generate activations.
@@ -1946,8 +1946,6 @@ class Project:
                 Defaults to None.
             force_regenerate (bool): Forcibly regenerate activations
                 for all slides even if .pt file exists. Defaults to False.
-            min_tiles (int, optional): Minimum tiles per slide. Skip slides
-                not meeting this threshold. Defaults to 16.
             batch_size (int): Batch size during feature calculation.
                 Defaults to 32.
             slide_batch_size (int): Interleave feature calculation across
@@ -1978,9 +1976,10 @@ class Project:
                 'saved Slideflow model.'
             )
 
-        # Ensure min_tiles and max_tiles is applied to the dataset.
-        # max_tiles has already been applied via @auto_dataset decorator.
-        dataset = dataset.filter(min_tiles=min_tiles)
+        # Ensure min_tiles is applied only when explicitly requested (> 0),
+        # preserving any filtering already configured on a supplied dataset.
+        if min_tiles:
+            dataset = dataset.filter(min_tiles=min_tiles)
 
         # Prepare output directory
         if outdir.lower() == 'auto':

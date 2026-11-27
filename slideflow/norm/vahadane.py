@@ -3,13 +3,17 @@
 from __future__ import division
 
 import cv2
+import warnings
 import numpy as np
 import joblib
 from typing import Dict
 
 import slideflow.norm.utils as ut
 from sklearn.decomposition import DictionaryLearning
-from slideflow import errors
+from slideflow import errors, log
+
+
+_SPAMS_FALLBACK_WARNED = False
 
 
 def get_stain_matrix_spams(
@@ -21,6 +25,9 @@ def get_stain_matrix_spams(
 ) -> np.ndarray:
     """Get 2x3 stain matrix. First row H and second row E.
 
+    Falls back to :func:`get_stain_matrix_sklearn` when ``spams`` is not
+    installed (e.g., on Python 3.12+ / NumPy 2 environments).
+
     Args:
         I (np.ndarray): RGB uint8 image.
         threshold (float): Threshold for determining non-white areas.
@@ -29,7 +36,22 @@ def get_stain_matrix_spams(
     Returns:
         np.ndarray:     2x3 stain matrix (first row H, second E)
     """
-    import spams
+    global _SPAMS_FALLBACK_WARNED
+    try:
+        import spams
+    except ImportError:
+        if not _SPAMS_FALLBACK_WARNED:
+            msg = (
+                "Optional dependency 'spams' is not installed (and is "
+                "incompatible with Python 3.12+ / NumPy 2); falling back to "
+                "'vahadane_sklearn' (scikit-learn DictionaryLearning)."
+            )
+            log.warning(msg)
+            warnings.warn(msg, DeprecationWarning, stacklevel=2)
+            _SPAMS_FALLBACK_WARNED = True
+        return get_stain_matrix_sklearn(
+            I, threshold=threshold, alpha=alpha, num_threads=num_threads
+        )
 
     mask = ut.notwhite_mask(I, thresh=threshold).reshape((-1,))
     OD = ut.RGB_to_OD(I).reshape((-1, 3))
