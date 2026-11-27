@@ -717,11 +717,18 @@ def test_patch_311_mil_eval_heatmaps_and_dir_bags(tmp_path):
         bags=str(bags_dir),
         outdir=train_out,
         attention_heatmaps=False,
+        device="cpu",
     )
+    trained_dirs = [
+        join(train_out, d)
+        for d in os.listdir(train_out)
+        if os.path.isdir(join(train_out, d))
+    ]
+    assert len(trained_dirs) == 1
 
     eval_out = str(tmp_path / "mil_hm_eval")
     df = eval_mil(
-        weights=train_out,
+        weights=trained_dirs[0],
         dataset=dts,
         outcomes="category",
         bags=str(bags_dir),  # directory string (#457)
@@ -845,8 +852,9 @@ def test_patch_311_generate_feature_bags_min_tiles_and_auto_dataset(tmp_path):
     dts = P.dataset(tile_px=64, tile_um=32)
     assert dts.num_tiles == 4
 
+    ext = sf.build_feature_extractor("resnet18_imagenet", tile_px=64)
     out_bags = P.generate_feature_bags(
-        "resnet18_imagenet",
+        ext,
         dataset=dts,
         outdir=str(tmp_path / "mt_bags"),
         batch_size=2,
@@ -945,10 +953,12 @@ def test_patch_311_custom_model_and_loss_eval_load(tmp_path):
     P.train(
         "category",
         params=hp,
-        val_strategy="none",
         dataset=dts,
+        val_dataset=dts,
+        pretrain=None,
+        steps_per_epoch_override=2,
+        use_tensorboard=False,
         mixed_precision=False,
-        num_workers=0,
     )
 
     model_zips = sorted(glob.glob(join(P.models_dir, "*", "*_epoch1.zip")))
@@ -966,8 +976,8 @@ def test_patch_311_custom_model_and_loss_eval_load(tmp_path):
         model_zip,
         outcomes="category",
         dataset=dts,
+        batch_size=2,
         mixed_precision=False,
-        num_workers=0,
         custom_objects=custom_objs,
     )
     assert isinstance(eval_res, dict)
